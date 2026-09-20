@@ -48,9 +48,14 @@ export class AudioStreamRecorder {
         video: false,
       });
 
-      // 2. Initialize AudioContext at 16kHz for model compatibility
+      // 2. Initialize AudioContext with fallback (some browsers reject explicit sampleRate)
       const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-      this.audioContext = new AudioCtx({ sampleRate: this.sampleRate });
+      try {
+        this.audioContext = new AudioCtx({ sampleRate: this.sampleRate });
+      } catch {
+        this.audioContext = new AudioCtx();
+      }
+
       if (this.audioContext.state === "suspended") {
         await this.audioContext.resume();
       }

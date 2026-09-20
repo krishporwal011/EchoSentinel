@@ -1,13 +1,13 @@
 "use client";
 
 import React from "react";
-import { ShieldCheck, ShieldAlert, AlertTriangle, AlertCircle } from "lucide-react";
+import { ShieldCheck, ShieldAlert, AlertTriangle, AlertCircle, Radio } from "lucide-react";
 
 export interface RiskMeterProps {
-  score: number; // 0 - 100
-  level: "Low" | "Suspicious" | "High" | "Critical";
-  confidence: number; // 0.0 - 1.0
-  prediction: "authentic" | "AI-generated";
+  score?: number | null; // 0 - 100
+  level?: "Low" | "Suspicious" | "High" | "Critical" | null;
+  confidence?: number | null; // 0.0 - 1.0
+  prediction?: "authentic" | "AI-generated" | null;
 }
 
 export const RiskMeter: React.FC<RiskMeterProps> = ({
@@ -16,42 +16,50 @@ export const RiskMeter: React.FC<RiskMeterProps> = ({
   confidence,
   prediction,
 }) => {
-  const safeScore = Math.max(0, Math.min(100, Math.round(score)));
+  const isIdle = score === null || score === undefined || !level || !prediction;
+  const safeScore = isIdle ? 0 : Math.max(0, Math.min(100, Math.round(score)));
 
   // Clean, professional configuration
-  const config = {
-    Low: {
-      color: "#10b981",
-      badgeClass: "bg-emerald-950/60 text-emerald-300 border-emerald-800/80",
-      icon: ShieldCheck,
-      emoji: "🟢",
-      label: "LOW RISK",
-    },
-    Suspicious: {
-      color: "#f59e0b",
-      badgeClass: "bg-amber-950/60 text-amber-300 border-amber-800/80",
-      icon: AlertTriangle,
-      emoji: "🟡",
-      label: "SUSPICIOUS",
-    },
-    High: {
-      color: "#f97316",
-      badgeClass: "bg-orange-950/60 text-orange-300 border-orange-800/80",
-      icon: ShieldAlert,
-      emoji: "🟠",
-      label: "HIGH RISK",
-    },
-    Critical: {
-      color: "#ef4444",
-      badgeClass: "bg-red-950/60 text-red-300 border-red-800/80",
-      icon: AlertCircle,
-      emoji: "🔴",
-      label: "CRITICAL",
-    },
-  }[level];
+  const config = !isIdle && level
+    ? {
+        Low: {
+          color: "#10b981",
+          badgeClass: "bg-emerald-950/60 text-emerald-300 border-emerald-800/80",
+          icon: ShieldCheck,
+          emoji: "🟢",
+          label: "LOW RISK",
+        },
+        Suspicious: {
+          color: "#f59e0b",
+          badgeClass: "bg-amber-950/60 text-amber-300 border-amber-800/80",
+          icon: AlertTriangle,
+          emoji: "🟡",
+          label: "SUSPICIOUS",
+        },
+        High: {
+          color: "#f97316",
+          badgeClass: "bg-orange-950/60 text-orange-300 border-orange-800/80",
+          icon: ShieldAlert,
+          emoji: "🟠",
+          label: "HIGH RISK",
+        },
+        Critical: {
+          color: "#ef4444",
+          badgeClass: "bg-red-950/60 text-red-300 border-red-800/80",
+          icon: AlertCircle,
+          emoji: "🔴",
+          label: "CRITICAL",
+        },
+      }[level]
+    : {
+        color: "#64748b",
+        badgeClass: "bg-slate-800/60 text-slate-400 border-slate-700",
+        icon: Radio,
+        emoji: "⚪",
+        label: "STANDBY",
+      };
 
   const Icon = config.icon;
-  const confidencePct = Math.round(confidence * 100);
 
   return (
     <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-sm">
@@ -84,19 +92,19 @@ export const RiskMeter: React.FC<RiskMeterProps> = ({
               className="text-3xl font-bold font-mono tracking-tight"
               style={{ color: config.color }}
             >
-              {safeScore}
+              {isIdle ? "--" : safeScore}
             </span>
             <span className="text-xs text-slate-500 font-mono">/ 100</span>
           </div>
         </div>
 
         <div className="bg-slate-950 p-3 rounded-lg border border-slate-800/80">
-          <div className="text-[11px] font-mono uppercase text-slate-400">Model Confidence</div>
+          <div className="text-[11px] font-mono uppercase text-slate-400">Model Spoof Score</div>
           <div className="flex items-baseline gap-1 mt-1">
             <span className="text-3xl font-bold font-mono tracking-tight text-slate-100">
-              {confidencePct}%
+              {isIdle ? "--" : `${safeScore}%`}
             </span>
-            <span className="text-xs text-slate-500 font-mono">prob</span>
+            <span className="text-xs text-slate-500 font-mono">score</span>
           </div>
         </div>
       </div>
@@ -117,7 +125,7 @@ export const RiskMeter: React.FC<RiskMeterProps> = ({
           <div className="h-full bg-orange-950 border-r border-slate-900" style={{ width: "20%" }} />
           <div className="h-full bg-red-950" style={{ width: "20%" }} />
 
-          {/* Solid Active Fill Indicator (no neon glow) */}
+          {/* Solid Active Fill Indicator */}
           <div
             className="absolute top-0 left-0 h-full transition-all duration-300 ease-out"
             style={{
@@ -133,7 +141,11 @@ export const RiskMeter: React.FC<RiskMeterProps> = ({
         <div className="text-slate-300">
           Status:{" "}
           <strong className="font-semibold text-slate-100">
-            {prediction === "AI-generated" ? "Possible Voice Clone" : "Likely Authentic"}
+            {isIdle
+              ? "Awaiting Audio Analysis"
+              : prediction === "AI-generated"
+              ? "Possible Voice Clone"
+              : "Likely Authentic"}
           </strong>
         </div>
         <div className="text-[11px] text-slate-400">
