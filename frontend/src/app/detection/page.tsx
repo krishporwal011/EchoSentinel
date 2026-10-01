@@ -13,10 +13,18 @@ import { UploadAudio } from "../../components/UploadAudio";
 import { AudioStreamRecorder } from "../../lib/audioRecorder";
 
 interface DetectionResponse {
-  prediction: "authentic" | "AI-generated";
+  prediction: "authentic" | "AI-generated" | "Possible spoof" | string;
+  raw_model_prediction?: string;
   confidence: number;
+  model_spoof_score?: number;
   risk_score: number;
   risk_level: "Low" | "Suspicious" | "High" | "Critical";
+  audio_quality_score?: number;
+  audio_quality_rating?: string;
+  detection_reliability?: "HIGH" | "MEDIUM" | "LOW";
+  reliability_label?: string;
+  quality_flags?: string[];
+  quality_warning?: string;
   processing_time_ms?: number;
 }
 
@@ -25,27 +33,26 @@ export default function DetectionPage() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [waveformData, setWaveformData] = useState<Uint8Array | null>(null);
   const [chunkCounter, setChunkCounter] = useState(1);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const [result, setResult] = useState<DetectionResponse>({
-    prediction: "authentic",
-    confidence: 0.93,
-    risk_score: 12,
-    risk_level: "Low",
-    processing_time_ms: 22.0,
-  });
+  const [result, setResult] = useState<DetectionResponse | null>(null);
 
   const [isVerificationOpen, setIsVerificationOpen] = useState(false);
   const [isBlocked, setIsBlocked] = useState(false);
 
   const recorderRef = useRef<AudioStreamRecorder | null>(null);
   const latestSeqRef = useRef<number>(0);
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+  const activeRequestsRef = useRef<number>(0);
+
+  const rawApiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+  const API_URL = rawApiUrl.replace(/\/+$/, "");
 
   const handleDetectionData = useCallback((data: DetectionResponse, seqId?: number) => {
     if (seqId && seqId < latestSeqRef.current) return;
     if (seqId) latestSeqRef.current = seqId;
 
     setResult(data);
+    setErrorMessage(null);
     if (data.risk_level === "High" || data.risk_level === "Critical") {
       setIsBlocked(true);
       setIsVerificationOpen(true);
@@ -54,6 +61,7 @@ export default function DetectionPage() {
 
   const sendChunk = useCallback(
     async (blob: Blob, seqId: number) => {
+      activeRequestsRef.current += 1;
       setIsAnalyzing(true);
       setChunkCounter(seqId);
 
@@ -62,32 +70,52 @@ export default function DetectionPage() {
         formData.append("file", blob, `detection_chunk_${seqId}.wav`);
 
         const resp = await fetch(`${API_URL}/detect`, { method: "POST", body: formData });
-        if (!resp.ok) throw new Error("API error");
+        if (!resp.ok) {
+          const errorBody = await resp.json().catch(() => null);
+          const detail = errorBody?.detail || `HTTP ${resp.status}`;
+          throw new Error(detail);
+        }
 
         const data: DetectionResponse = await resp.json();
         handleDetectionData(data, seqId);
-      } catch (err) {
+      } catch (err: any) {
         console.warn("Detection error:", err);
       } finally {
-        setIsAnalyzing(false);
+        activeRequestsRef.current = Math.max(0, activeRequestsRef.current - 1);
+        if (activeRequestsRef.current === 0) {
+          setIsAnalyzing(false);
+        }
       }
     },
     [API_URL, handleDetectionData]
   );
 
   const handleStart = async () => {
+    setErrorMessage(null);
     try {
       const recorder = new AudioStreamRecorder({
         chunkIntervalMs: 2800,
         onChunk: sendChunk,
         onWaveformData: setWaveformData,
-        onError: () => handleStop(),
+        onError: (err) => {
+          setErrorMessage(
+            err.message?.includes("Permission")
+              ? "Microphone access denied. Please allow microphone access in browser."
+              : `Microphone error: ${err.message}`
+          );
+          handleStop();
+        },
       });
       recorderRef.current = recorder;
       await recorder.start();
       setIsRecording(true);
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
+      setErrorMessage(
+        err.message?.includes("Permission") || err.name === "NotAllowedError"
+          ? "Microphone access denied. Please check permissions."
+          : `Failed to initialize microphone: ${err.message || "Device unavailable"}`
+      );
       setIsRecording(false);
     }
   };
@@ -99,30 +127,41 @@ export default function DetectionPage() {
     }
     setIsRecording(false);
     setIsAnalyzing(false);
+    activeRequestsRef.current = 0;
     setWaveformData(null);
   };
 
   const handleUpload = async (file: File) => {
     if (isRecording) handleStop();
+    activeRequestsRef.current += 1;
     setIsAnalyzing(true);
+    setErrorMessage(null);
 
     try {
       const formData = new FormData();
       formData.append("file", file, file.name);
 
       const resp = await fetch(`${API_URL}/detect`, { method: "POST", body: formData });
-      if (!resp.ok) throw new Error("Upload error");
+      if (!resp.ok) {
+        const errorBody = await resp.json().catch(() => null);
+        const detail = errorBody?.detail || `Upload failed (HTTP ${resp.status})`;
+        throw new Error(detail);
+      }
 
       const data: DetectionResponse = await resp.json();
       handleDetectionData(data, ++latestSeqRef.current);
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
+      setErrorMessage(err.message || "Audio processing failed.");
     } finally {
-      setIsAnalyzing(false);
+      activeRequestsRef.current = Math.max(0, activeRequestsRef.current - 1);
+      if (activeRequestsRef.current === 0) {
+        setIsAnalyzing(false);
+      }
     }
   };
 
-  const isThreat = result.risk_level === "High" || result.risk_level === "Critical";
+  const isThreat = result ? result.risk_level === "High" || result.risk_level === "Critical" : false;
 
   return (
     <PageTransition>
@@ -140,6 +179,23 @@ export default function DetectionPage() {
             files to evaluate synthetic cloning likelihood.
           </p>
         </div>
+
+        {/* User Error Banner */}
+        {errorMessage && (
+          <div className="p-4 rounded-xl bg-[#e66d76]/10 border border-[#e66d76]/40 text-[#e66d76] flex items-center justify-between text-xs font-mono">
+            <div className="flex items-center gap-2">
+              <span className="font-bold">NOTICE:</span>
+              <span>{errorMessage}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setErrorMessage(null)}
+              className="text-[#e66d76] hover:text-white px-2 py-0.5 rounded text-sm transition-colors"
+            >
+              ✕
+            </button>
+          </div>
+        )}
 
         {/* Primary Controls */}
         <div className="flex flex-wrap items-center gap-4">
@@ -167,7 +223,7 @@ export default function DetectionPage() {
         </div>
 
         {/* Warning If High / Critical */}
-        {isThreat && (
+        {isThreat && result && (
           <WarningPanel
             riskScore={result.risk_score}
             riskLevel={result.risk_level === "Critical" ? "Critical" : "High"}
@@ -181,28 +237,35 @@ export default function DetectionPage() {
           waveformData={waveformData}
           chunkNumber={chunkCounter}
           isAnalyzing={isAnalyzing}
-          riskLevel={result.risk_level}
+          riskLevel={result ? result.risk_level : "Low"}
         />
 
         {/* Pipeline Nodes */}
         <AnalysisPipeline
           isAnalyzing={isAnalyzing}
-          processingTimeMs={result.processing_time_ms}
+          processingTimeMs={result?.processing_time_ms}
         />
 
         {/* Result & Gauge */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <DetectionResult
-            prediction={result.prediction}
-            confidence={result.confidence}
-            riskScore={result.risk_score}
-            riskLevel={result.risk_level}
+            prediction={result?.prediction}
+            rawModelPrediction={result?.raw_model_prediction}
+            confidence={result?.confidence}
+            modelSpoofScore={result?.model_spoof_score}
+            riskScore={result?.risk_score}
+            riskLevel={result?.risk_level}
+            audioQualityScore={result?.audio_quality_score}
+            audioQualityRating={result?.audio_quality_rating}
+            detectionReliability={result?.detection_reliability}
+            qualityWarning={result?.quality_warning}
+            qualityFlags={result?.quality_flags}
           />
 
           <RiskIndicator
-            score={result.risk_score}
-            level={result.risk_level}
-            confidence={result.confidence}
+            score={result?.risk_score ?? null}
+            level={result?.risk_level ?? null}
+            confidence={result?.confidence ?? null}
           />
         </div>
 

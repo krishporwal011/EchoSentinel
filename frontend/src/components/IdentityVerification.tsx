@@ -83,10 +83,10 @@ export const IdentityVerification: React.FC<IdentityVerificationProps> = ({
             </div>
             <div>
               <span className="text-[10px] font-mono tracking-widest text-[#9ba2b1] uppercase block">
-                STEP-UP CHALLENGE
+                STEP-UP CHALLENGE • SIMULATION
               </span>
               <h2 className="font-serif-cinematic text-xl sm:text-2xl text-[#f4f5f7]">
-                Identity Verification
+                Prototype Verification Gate
               </h2>
             </div>
           </div>
@@ -104,14 +104,15 @@ export const IdentityVerification: React.FC<IdentityVerificationProps> = ({
         <div className="p-6 sm:p-8 space-y-6">
           <div className="text-center max-w-md mx-auto">
             <p className="text-xs text-[#9ba2b1] italic">
-              Detection alone is not proof of identity. Complete the challenge to continue.
+              Prototype Demonstration: Acoustic detection triggered a risk intervention gate.
+              Automated voice biometrics are not implemented; use the simulation controls below.
             </p>
           </div>
 
           {/* Dynamic Challenge Phrase Box */}
           <div className="p-5 rounded-xl bg-[#090b11] border border-[rgba(255,255,255,0.08)] text-center">
             <span className="text-[10px] font-mono tracking-widest text-[#66b7ff] uppercase block mb-2">
-              DYNAMIC ACOUSTIC CHALLENGE
+              DYNAMIC ACOUSTIC CHALLENGE (SAMPLE PHRASE)
             </span>
             <div className="text-lg sm:text-xl font-serif-cinematic text-[#f4f5f7] py-2">
               "Say: {phrase}"
@@ -126,7 +127,7 @@ export const IdentityVerification: React.FC<IdentityVerificationProps> = ({
               className="p-4 rounded-xl bg-[#181c27] border border-[#66b7ff]/30 flex flex-col items-center gap-2 text-center"
             >
               <div className="w-8 h-8 rounded-full border-2 border-[#66b7ff] border-t-transparent animate-spin" />
-              <span className="text-xs font-mono text-[#8ddcff]">LISTENING FOR RESPONSE...</span>
+              <span className="text-xs font-mono text-[#8ddcff]">SIMULATING RESPONSE CAPTURE...</span>
             </motion.div>
           )}
 
@@ -136,7 +137,7 @@ export const IdentityVerification: React.FC<IdentityVerificationProps> = ({
               animate={{ opacity: 1 }}
               className="p-4 rounded-xl bg-[#181c27] border border-[#8ddcff]/30 flex flex-col items-center gap-2 text-center"
             >
-              <span className="text-xs font-mono text-[#8ddcff] animate-pulse">VERIFYING SIGNALS...</span>
+              <span className="text-xs font-mono text-[#8ddcff] animate-pulse">EVALUATING CHALLENGE RESPONSE...</span>
             </motion.div>
           )}
 
@@ -147,7 +148,7 @@ export const IdentityVerification: React.FC<IdentityVerificationProps> = ({
               className="p-4 rounded-xl bg-[#70d6a0]/10 border border-[#70d6a0]/40 flex items-center justify-center gap-2 text-[#70d6a0]"
             >
               <CheckCircle2 size={18} />
-              <span className="text-xs font-mono font-semibold">VERIFIED • CONTINUED</span>
+              <span className="text-xs font-mono font-semibold">SIMULATED PASS • UNBLOCKED</span>
             </motion.div>
           )}
 
@@ -159,18 +160,18 @@ export const IdentityVerification: React.FC<IdentityVerificationProps> = ({
             >
               <div className="flex items-center gap-2">
                 <XCircle size={18} />
-                <span className="text-xs font-mono font-semibold">ACCESS BLOCKED</span>
+                <span className="text-xs font-mono font-semibold">SIMULATED BLOCK • FLOW HALTED</span>
               </div>
               <p className="text-[11px] text-[#9ba2b1]">
-                Identity verification is required before continuing.
+                Step-up challenge simulation rejected. Sensitive action remains locked.
               </p>
             </motion.div>
           )}
 
           {/* Prototype Honest Guardrail Note */}
           <div className="p-3 bg-[#090b11]/60 rounded-lg border border-[rgba(255,255,255,0.06)] text-[11px] text-[#626978] leading-normal text-center">
-            <strong>Prototype Security Gate:</strong> Manual controls demonstrate the prevention flow
-            and do not mathematically prove biological identity.
+            <strong>Prototype Security Gate:</strong> Manual controls demonstrate the prevention workflow
+            and do not cryptographically or biometrically verify the speaker's vocal identity.
           </div>
         </div>
 
@@ -192,7 +193,7 @@ export const IdentityVerification: React.FC<IdentityVerificationProps> = ({
                 onClick={handleFail}
                 className="px-4 py-2.5 rounded-xl border border-[#e66d76]/30 bg-[#e66d76]/10 hover:bg-[#e66d76]/20 text-[#e66d76] text-xs font-mono transition-colors flex items-center justify-center gap-1.5"
               >
-                <span>Fail / Block</span>
+                <span>Simulate Block</span>
               </button>
               <button
                 type="button"
@@ -200,7 +201,7 @@ export const IdentityVerification: React.FC<IdentityVerificationProps> = ({
                 className="px-6 py-2.5 rounded-xl bg-[#70d6a0] hover:bg-[#70d6a0]/90 text-[#090b11] text-xs font-mono font-semibold transition-colors flex items-center justify-center gap-1.5"
               >
                 <CheckCircle2 size={15} />
-                <span>Verify & Continue</span>
+                <span>Simulate Pass & Continue</span>
               </button>
             </>
           )}

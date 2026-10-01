@@ -29,14 +29,15 @@ export default function VerificationPage() {
         {/* Page Header */}
         <div className="space-y-3">
           <span className="text-[10px] font-mono tracking-widest text-[#66b7ff] uppercase block">
-            PREVENTION LAYER
+            PREVENTION LAYER • PROTOTYPE
           </span>
           <h1 className="font-serif-cinematic text-4xl sm:text-5xl text-[#f4f5f7]">
-            Identity Verification Gate
+            Prototype Verification Gate
           </h1>
           <p className="text-sm text-[#9ba2b1] max-w-xl">
-            When high or critical acoustic clone risk is identified, EchoSentinel halts sensitive
-            operations until dynamic challenge verification is satisfied.
+            Demonstration of step-up defense: when high or critical acoustic clone risk is identified,
+            EchoSentinel halts sensitive operations. Automatic speech-to-text and vocal biometrics are
+            simulated for this prototype workflow.
           </p>
         </div>
 

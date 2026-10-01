@@ -19,12 +19,21 @@ import { AudioStreamRecorder } from "../lib/audioRecorder";
 import { WORKFLOW_STEPS, HONEST_LIMITATIONS } from "../lib/content";
 
 interface DetectionResponse {
-  prediction: "authentic" | "AI-generated";
+  prediction: "authentic" | "AI-generated" | "Possible spoof" | string;
+  raw_model_prediction?: string;
   confidence: number;
+  model_spoof_score?: number;
   risk_score: number;
   risk_level: "Low" | "Suspicious" | "High" | "Critical";
+  audio_quality_score?: number;
+  audio_quality_rating?: string;
+  detection_reliability?: "HIGH" | "MEDIUM" | "LOW";
+  reliability_label?: string;
+  quality_flags?: string[];
+  quality_warning?: string;
   processing_time_ms?: number;
   model_source?: string;
+  status?: string;
 }
 
 export default function Home() {
@@ -40,15 +49,10 @@ export default function Home() {
   const [waveformData, setWaveformData] = useState<Uint8Array | null>(null);
   const [chunkCounter, setChunkCounter] = useState(1);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // Results State
-  const [result, setResult] = useState<DetectionResponse>({
-    prediction: "authentic",
-    confidence: 0.93,
-    risk_score: 12,
-    risk_level: "Low",
-    processing_time_ms: 24.5,
-  });
+  // Results State - starts as null until actual inference completes
+  const [result, setResult] = useState<DetectionResponse | null>(null);
 
   // Verification & Threat Mitigation State
   const [isVerificationOpen, setIsVerificationOpen] = useState(false);
@@ -63,26 +67,72 @@ export default function Home() {
   const recorderRef = useRef<AudioStreamRecorder | null>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const latestSeqRef = useRef<number>(0);
+  const activeRequestsRef = useRef<number>(0);
+  const recentScoresRef = useRef<number[]>([]);
 
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+  const rawApiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+  const API_URL = rawApiUrl.replace(/\/+$/, "");
 
-  // Handle incoming detection result
-  const handleDetectionData = useCallback((data: DetectionResponse, seqId?: number) => {
-    if (seqId && seqId < latestSeqRef.current) return;
-    if (seqId) latestSeqRef.current = seqId;
+  // Handle incoming detection result with sequence-number protection and temporal smoothing
+  const handleDetectionData = useCallback(
+    (data: DetectionResponse, seqId?: number, isLiveChunk: boolean = false) => {
+      // Sequence protection: discard older out-of-order responses
+      if (seqId && seqId < latestSeqRef.current) {
+        return;
+      }
+      if (seqId) latestSeqRef.current = seqId;
 
-    setResult(data);
+      let finalData = data;
 
-    if (data.risk_level === "High" || data.risk_level === "Critical") {
-      setIsBlocked(true);
-      setIsVerified(false);
-      setIsVerificationOpen(true);
-    }
-  }, []);
+      // Temporal smoothing over recent live chunks (sliding window of up to 3 chunks)
+      if (isLiveChunk) {
+        recentScoresRef.current.push(data.risk_score);
+        if (recentScoresRef.current.length > 3) {
+          recentScoresRef.current.shift();
+        }
 
-  // Send an audio chunk to backend /detect
+        // Apply smoothing to prevent jumping, but do NOT suppress genuine Critical spikes (>=81)
+        if (data.risk_score < 80 && recentScoresRef.current.length >= 2) {
+          const weights =
+            recentScoresRef.current.length === 2 ? [0.4, 0.6] : [0.2, 0.3, 0.5];
+          const smoothedScore = Math.round(
+            recentScoresRef.current.reduce((acc, score, idx) => acc + score * weights[idx], 0)
+          );
+          const smoothedLevel: "Low" | "Suspicious" | "High" | "Critical" =
+            smoothedScore <= 30
+              ? "Low"
+              : smoothedScore <= 60
+              ? "Suspicious"
+              : smoothedScore <= 80
+              ? "High"
+              : "Critical";
+
+          finalData = {
+            ...data,
+            risk_score: smoothedScore,
+            risk_level: smoothedLevel,
+          };
+        }
+      } else {
+        recentScoresRef.current = [data.risk_score];
+      }
+
+      setResult(finalData);
+      setErrorMessage(null);
+
+      if (finalData.risk_level === "High" || finalData.risk_level === "Critical") {
+        setIsBlocked(true);
+        setIsVerified(false);
+        setIsVerificationOpen(true);
+      }
+    },
+    []
+  );
+
+  // Send an audio chunk to backend /detect with concurrency tracking
   const sendChunk = useCallback(
     async (blob: Blob, seqId: number, simulateType?: "genuine" | "clone") => {
+      activeRequestsRef.current += 1;
       setIsAnalyzing(true);
       setChunkCounter(seqId);
 
@@ -94,14 +144,21 @@ export default function Home() {
         if (simulateType) url += `?simulate=${simulateType}`;
 
         const resp = await fetch(url, { method: "POST", body: formData });
-        if (!resp.ok) throw new Error(`HTTP error ${resp.status}`);
+        if (!resp.ok) {
+          const errorBody = await resp.json().catch(() => null);
+          const detail = errorBody?.detail || `HTTP ${resp.status}`;
+          throw new Error(detail);
+        }
 
         const data: DetectionResponse = await resp.json();
-        handleDetectionData(data, seqId);
-      } catch (err) {
+        handleDetectionData(data, seqId, true);
+      } catch (err: any) {
         console.warn("Stream analysis notice:", err);
       } finally {
-        setIsAnalyzing(false);
+        activeRequestsRef.current = Math.max(0, activeRequestsRef.current - 1);
+        if (activeRequestsRef.current === 0) {
+          setIsAnalyzing(false);
+        }
       }
     },
     [API_URL, handleDetectionData]
@@ -111,6 +168,8 @@ export default function Home() {
   const handleStartDetection = async () => {
     setIsDemoSimulated(false);
     setRecordingSeconds(0);
+    setErrorMessage(null);
+    recentScoresRef.current = [];
 
     try {
       const recorder = new AudioStreamRecorder({
@@ -120,7 +179,6 @@ export default function Home() {
         },
         onWaveformData: (data) => {
           setWaveformData(data);
-          // Compute rough normalized amplitude 0..1 for visual reactivity
           let sum = 0;
           for (let i = 0; i < data.length; i++) {
             sum += Math.abs(data[i] - 128);
@@ -130,6 +188,11 @@ export default function Home() {
         },
         onError: (err) => {
           console.error("Mic error:", err);
+          setErrorMessage(
+            err.message?.includes("Permission") || err.message?.includes("NotAllowedError")
+              ? "Microphone access was denied. Please allow microphone permission in your browser."
+              : `Microphone error: ${err.message || "Device unavailable."}`
+          );
           handleStopDetection();
         },
       });
@@ -141,8 +204,13 @@ export default function Home() {
       timerRef.current = setInterval(() => {
         setRecordingSeconds((prev) => prev + 1);
       }, 1000);
-    } catch (err) {
+    } catch (err: any) {
       console.error("Failed to start detection:", err);
+      setErrorMessage(
+        err.message?.includes("Permission") || err.name === "NotAllowedError"
+          ? "Microphone access was denied. Please allow microphone permission in your browser settings."
+          : `Failed to initialize microphone: ${err.message || "Device unavailable"}`
+      );
       setIsRecording(false);
     }
   };
@@ -159,29 +227,41 @@ export default function Home() {
     }
     setIsRecording(false);
     setIsAnalyzing(false);
+    activeRequestsRef.current = 0;
     setAudioLevel(0);
     setWaveformData(null);
+    recentScoresRef.current = [];
   };
 
   // File Upload Ingestion
   const handleFileSelected = async (file: File) => {
     if (isRecording) handleStopDetection();
     setIsDemoSimulated(false);
+    activeRequestsRef.current += 1;
     setIsAnalyzing(true);
+    setErrorMessage(null);
 
     try {
       const formData = new FormData();
       formData.append("file", file, file.name);
 
       const resp = await fetch(`${API_URL}/detect`, { method: "POST", body: formData });
-      if (!resp.ok) throw new Error("Upload processing error");
+      if (!resp.ok) {
+        const errorBody = await resp.json().catch(() => null);
+        const detail = errorBody?.detail || `Upload processing failed (HTTP ${resp.status})`;
+        throw new Error(detail);
+      }
 
       const data: DetectionResponse = await resp.json();
-      handleDetectionData(data, ++latestSeqRef.current);
-    } catch (err) {
+      handleDetectionData(data, ++latestSeqRef.current, false);
+    } catch (err: any) {
       console.error("Upload failed:", err);
+      setErrorMessage(err.message || "Upload processing failed.");
     } finally {
-      setIsAnalyzing(false);
+      activeRequestsRef.current = Math.max(0, activeRequestsRef.current - 1);
+      if (activeRequestsRef.current === 0) {
+        setIsAnalyzing(false);
+      }
     }
   };
 
@@ -189,17 +269,19 @@ export default function Home() {
   const handleSimulateGenuine = () => {
     setIsDemoSimulated(true);
     setIsAnalyzing(true);
+    setErrorMessage(null);
 
     setTimeout(() => {
       const mock: DetectionResponse = {
         prediction: "authentic",
         confidence: 0.93,
-        risk_score: 12,
+        model_spoof_score: 0.07,
+        risk_score: 7,
         risk_level: "Low",
         processing_time_ms: 18.2,
         model_source: "demo_simulation",
       };
-      handleDetectionData(mock, ++latestSeqRef.current);
+      handleDetectionData(mock, ++latestSeqRef.current, false);
       setIsBlocked(false);
       setIsVerified(false);
       setIsAnalyzing(false);
@@ -210,34 +292,32 @@ export default function Home() {
   const handleSimulateClone = () => {
     setIsDemoSimulated(true);
     setIsAnalyzing(true);
+    setErrorMessage(null);
 
     setTimeout(() => {
       const mock: DetectionResponse = {
         prediction: "AI-generated",
         confidence: 0.88,
+        model_spoof_score: 0.88,
         risk_score: 88,
         risk_level: "Critical",
         processing_time_ms: 22.4,
         model_source: "demo_simulation",
       };
-      handleDetectionData(mock, ++latestSeqRef.current);
+      handleDetectionData(mock, ++latestSeqRef.current, false);
       setIsAnalyzing(false);
     }, 700);
   };
 
   const handleReset = () => {
     handleStopDetection();
-    setResult({
-      prediction: "authentic",
-      confidence: 0.93,
-      risk_score: 12,
-      risk_level: "Low",
-      processing_time_ms: 24.5,
-    });
+    setResult(null);
     setIsBlocked(false);
     setIsVerified(false);
     setIsVerificationOpen(false);
     setIsDemoSimulated(false);
+    setErrorMessage(null);
+    recentScoresRef.current = [];
   };
 
   const formatTimer = (secs: number) => {
@@ -246,7 +326,7 @@ export default function Home() {
     return `${m}:${s}`;
   };
 
-  const isThreatActive = result.risk_level === "High" || result.risk_level === "Critical";
+  const isThreatActive = result ? result.risk_level === "High" || result.risk_level === "Critical" : false;
 
   return (
     <>
@@ -335,13 +415,30 @@ export default function Home() {
               <AudioLandscape
                 isRecording={isRecording}
                 audioLevel={audioLevel}
-                riskLevel={result.risk_level}
+                riskLevel={result ? result.risk_level : "Low"}
               />
             </div>
           </section>
 
+          {/* User Error Banner */}
+          {errorMessage && (
+            <div className="p-4 rounded-xl bg-[#e66d76]/10 border border-[#e66d76]/40 text-[#e66d76] flex items-center justify-between text-xs font-mono">
+              <div className="flex items-center gap-2">
+                <span className="font-bold">NOTICE:</span>
+                <span>{errorMessage}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setErrorMessage(null)}
+                className="text-[#e66d76] hover:text-white px-2 py-0.5 rounded text-sm transition-colors"
+              >
+                ✕
+              </button>
+            </div>
+          )}
+
           {/* High / Critical Threat Warning Layer */}
-          {isThreatActive && (
+          {isThreatActive && result && (
             <WarningPanel
               riskScore={result.risk_score}
               riskLevel={result.risk_level === "Critical" ? "Critical" : "High"}
@@ -357,30 +454,37 @@ export default function Home() {
               waveformData={waveformData}
               chunkNumber={chunkCounter}
               isAnalyzing={isAnalyzing}
-              riskLevel={result.risk_level}
+              riskLevel={result ? result.risk_level : "Low"}
             />
 
             {/* Sequential Neural Analysis Nodes */}
             <AnalysisPipeline
               isAnalyzing={isAnalyzing}
-              processingTimeMs={result.processing_time_ms}
+              processingTimeMs={result?.processing_time_ms}
             />
 
             {/* Primary Result Headline */}
             <DetectionResult
-              prediction={result.prediction}
-              confidence={result.confidence}
-              riskScore={result.risk_score}
-              riskLevel={result.risk_level}
+              prediction={result?.prediction}
+              rawModelPrediction={result?.raw_model_prediction}
+              confidence={result?.confidence}
+              modelSpoofScore={result?.model_spoof_score}
+              riskScore={result?.risk_score}
+              riskLevel={result?.risk_level}
+              audioQualityScore={result?.audio_quality_score}
+              audioQualityRating={result?.audio_quality_rating}
+              detectionReliability={result?.detection_reliability}
+              qualityWarning={result?.quality_warning}
+              qualityFlags={result?.quality_flags}
               isDemoSimulated={isDemoSimulated}
             />
 
             {/* Twin Threat Gauge & Demo Controls */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <RiskIndicator
-                score={result.risk_score}
-                level={result.risk_level}
-                confidence={result.confidence}
+                score={result?.risk_score ?? null}
+                level={result?.risk_level ?? null}
+                confidence={result?.confidence ?? null}
               />
 
               <DemoMode
