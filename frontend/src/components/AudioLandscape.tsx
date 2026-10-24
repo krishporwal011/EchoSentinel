@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useRef } from "react";
+import React, { useCallback, useEffect, useRef } from "react";
 
 interface AudioLandscapeProps {
   isRecording?: boolean;
@@ -15,7 +15,7 @@ export const AudioLandscape: React.FC<AudioLandscapeProps> = ({
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  const getRiskColor = (alpha = 1) => {
+  const getRiskColor = useCallback((alpha = 1) => {
     switch (riskLevel) {
       case "Critical":
         return `rgba(230, 109, 118, ${alpha})`;
@@ -27,7 +27,7 @@ export const AudioLandscape: React.FC<AudioLandscapeProps> = ({
       default:
         return `rgba(102, 183, 255, ${alpha})`;
     }
-  };
+  }, [riskLevel]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -130,7 +130,7 @@ export const AudioLandscape: React.FC<AudioLandscapeProps> = ({
       cancelAnimationFrame(animId);
       window.removeEventListener("resize", handleResize);
     };
-  }, [isRecording, audioLevel, riskLevel]);
+  }, [isRecording, audioLevel, riskLevel, getRiskColor]);
 
   return (
     <div className="relative w-full h-[280px] sm:h-[340px] md:h-[400px] flex items-center justify-center select-none pointer-events-none">

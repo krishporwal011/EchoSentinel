@@ -1,17 +1,6 @@
 /**
- * EchoSentinel Editorial & Verification Content
+ * EchoSentinel editorial and workflow content
  */
-
-export const CHALLENGE_PHRASES = [
-  "Blue mountains remember the morning.",
-  "Silver rivers run quiet through stone.",
-  "Forty-seven shadows follow the wind.",
-  "Golden lanterns flicker before dawn.",
-  "Cobalt waves whisper against the shore.",
-  "Amber horizon holds the quiet bell.",
-  "Velvet echoes carry through the valley.",
-  "Ancient cedar stands beneath the stars.",
-];
 
 export const PIPELINE_STAGES = [
   { id: "audio", label: "AUDIO INGEST", desc: "16 kHz continuous capture & windowing" },
@@ -39,7 +28,7 @@ export const WORKFLOW_STEPS = [
   {
     step: "04",
     title: "PROTECT",
-    description: "Compute threat scores across 4 calibrated risk bands and trigger a dynamic identity challenge before sensitive continuation.",
+    description: "Display the model's class scores as operational bands, with a clear explanation that they are estimates.",
   },
 ];
 

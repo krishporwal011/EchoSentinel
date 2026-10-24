@@ -50,14 +50,14 @@ export const Navbar: React.FC<NavbarProps> = ({
             <span className="text-sm font-mono font-bold tracking-[0.2em] text-[#f4f5f7] group-hover:text-white transition-colors">
               ECHOSENTINEL
             </span>
-            <span className="text-[9px] font-mono tracking-[0.25em] text-[#9ba2b1] uppercase">
+            <span className="text-[13px] font-mono tracking-[0.25em] text-[#9ba2b1] uppercase">
               Voice Security
             </span>
           </div>
         </Link>
 
         {/* Center: Desktop Navigation Links */}
-        <nav className="hidden md:flex items-center gap-8 text-xs font-mono tracking-widest text-[#9ba2b1]">
+        <nav className="hidden md:flex items-center gap-8 text-sm font-mono tracking-widest text-[#9ba2b1]">
           {navLinks.map((link) => {
             const isActive = pathname === link.href;
             return (
@@ -84,17 +84,17 @@ export const Navbar: React.FC<NavbarProps> = ({
               type="button"
               onClick={onToggleSound}
               aria-label={soundEnabled ? "Mute audio" : "Enable audio"}
-              className="p-2 rounded-full border border-[rgba(255,255,255,0.12)] bg-[#111520] hover:bg-[#181c27] text-[#9ba2b1] hover:text-[#f4f5f7] transition-colors flex items-center gap-1.5 text-xs font-mono"
+              className="p-2 rounded-full border border-[rgba(255,255,255,0.12)] bg-[#111520] hover:bg-[#181c27] text-[#9ba2b1] hover:text-[#f4f5f7] transition-colors flex items-center gap-1.5 text-sm font-mono"
             >
               {soundEnabled ? (
                 <>
                   <Volume2 size={14} className="text-[#66b7ff]" />
-                  <span className="hidden sm:inline text-[10px]">SOUND ON</span>
+                  <span className="hidden sm:inline text-[12px]">SOUND ON</span>
                 </>
               ) : (
                 <>
                   <VolumeX size={14} />
-                  <span className="hidden sm:inline text-[10px]">SOUND OFF</span>
+                  <span className="hidden sm:inline text-[12px]">SOUND OFF</span>
                 </>
               )}
             </button>
@@ -120,7 +120,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               key={link.href}
               href={link.href}
               onClick={() => setMobileMenuOpen(false)}
-              className={`block text-xs font-mono tracking-widest ${
+              className={`block text-sm font-mono tracking-widest ${
                 pathname === link.href ? "text-[#66b7ff] font-semibold" : "text-[#9ba2b1]"
               }`}
             >

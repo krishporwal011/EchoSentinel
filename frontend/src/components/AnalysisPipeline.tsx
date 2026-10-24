@@ -24,7 +24,7 @@ export const AnalysisPipeline: React.FC<AnalysisPipelineProps> = ({
     <div className="w-full bg-[#111520] border border-[rgba(255,255,255,0.12)] rounded-xl p-4 sm:p-5 shadow-sm">
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
-          <span className="text-[10px] font-mono tracking-widest text-[#9ba2b1] uppercase">
+          <span className="text-[12px] font-mono tracking-widest text-[#9ba2b1] uppercase">
             NEURAL ANALYSIS PIPELINE
           </span>
           {isAnalyzing && (
@@ -32,7 +32,7 @@ export const AnalysisPipeline: React.FC<AnalysisPipelineProps> = ({
           )}
         </div>
         {processingTimeMs && processingTimeMs > 0 && (
-          <span className="text-[10px] font-mono text-[#9ba2b1]">
+          <span className="text-[12px] font-mono text-[#9ba2b1]">
             LATENCY: <strong className="text-[#f4f5f7]">{processingTimeMs.toFixed(0)} ms</strong>
           </span>
         )}
@@ -51,7 +51,7 @@ export const AnalysisPipeline: React.FC<AnalysisPipelineProps> = ({
               className={`p-3 rounded-lg border transition-all duration-300 flex flex-col items-center text-center relative ${
                 isActive
                   ? "bg-[#181c27] border-[#66b7ff]/40 text-[#f4f5f7]"
-                  : "bg-[#090b11] border-[rgba(255,255,255,0.08)] text-[#626978]"
+                  : "bg-[#090b11] border-[rgba(255,255,255,0.08)] text-[#8b93a3]"
               }`}
             >
               <motion.div
@@ -73,7 +73,7 @@ export const AnalysisPipeline: React.FC<AnalysisPipelineProps> = ({
               >
                 <Icon size={16} />
               </motion.div>
-              <span className="text-[10px] font-mono tracking-wider font-semibold">
+              <span className="text-[12px] font-mono tracking-wider font-semibold">
                 {node.label}
               </span>
             </div>

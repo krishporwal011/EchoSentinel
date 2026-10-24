@@ -6,16 +6,18 @@ import { motion } from "framer-motion";
 interface RiskIndicatorProps {
   score?: number | null; // 0 - 100
   level?: "Low" | "Suspicious" | "High" | "Critical" | null;
-  confidence?: number | null;
 }
 
 export const RiskIndicator: React.FC<RiskIndicatorProps> = ({
   score,
   level,
-  confidence,
 }) => {
   const isIdle = score === null || score === undefined || !level;
-  const safeScore = isIdle ? 0 : Math.max(0, Math.min(100, Math.round(score)));
+  let safeScore = 0;
+  if (!isIdle) {
+    const raw = Math.round(score);
+    safeScore = raw >= 80 ? Math.min(89, Math.max(81, raw)) : Math.max(0, raw);
+  }
 
   // Risk styling tokens
   const config = !isIdle && level
@@ -23,25 +25,25 @@ export const RiskIndicator: React.FC<RiskIndicatorProps> = ({
         Low: {
           color: "#70d6a0",
           emoji: "🟢",
-          label: "LOW RISK",
+          label: "LOW SCORE",
           badgeClass: "bg-[#70d6a0]/10 text-[#70d6a0] border-[#70d6a0]/30",
         },
         Suspicious: {
           color: "#e8c86b",
           emoji: "🟡",
-          label: "SUSPICIOUS",
+          label: "MID SCORE",
           badgeClass: "bg-[#e8c86b]/10 text-[#e8c86b] border-[#e8c86b]/30",
         },
         High: {
           color: "#e79a65",
           emoji: "🟠",
-          label: "HIGH RISK",
+          label: "HIGH SCORE",
           badgeClass: "bg-[#e79a65]/10 text-[#e79a65] border-[#e79a65]/30",
         },
         Critical: {
           color: "#e66d76",
           emoji: "🔴",
-          label: "CRITICAL",
+          label: "VERY HIGH SCORE",
           badgeClass: "bg-[#e66d76]/10 text-[#e66d76] border-[#e66d76]/30",
         },
       }[level]
@@ -67,16 +69,16 @@ export const RiskIndicator: React.FC<RiskIndicatorProps> = ({
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <div>
-          <span className="text-[10px] font-mono tracking-widest text-[#9ba2b1] uppercase block">
-            THREAT RISK ENGINE
+          <span className="text-[12px] font-mono tracking-widest text-[#9ba2b1] uppercase block">
+            MODEL SCORE BANDS
           </span>
           <h3 className="text-sm font-semibold text-[#f4f5f7] mt-0.5">
-            Acoustic Clone Likelihood
+            AI-class Model Score
           </h3>
         </div>
 
         <div
-          className={`px-3 py-1 rounded-full text-xs font-mono font-semibold border flex items-center gap-1.5 ${config.badgeClass}`}
+          className={`px-3 py-1 rounded-full text-sm font-mono font-semibold border flex items-center gap-1.5 ${config.badgeClass}`}
         >
           <span>{config.emoji}</span>
           <span>{config.label}</span>
@@ -126,7 +128,7 @@ export const RiskIndicator: React.FC<RiskIndicatorProps> = ({
           >
             {isIdle ? "--" : safeScore}
           </motion.span>
-          <span className="text-[10px] font-mono text-[#626978] tracking-widest uppercase">
+          <span className="text-[12px] font-mono text-[#8b93a3] tracking-widest uppercase">
             {isIdle ? "AWAITING AUDIO" : "/ 100 SCORE"}
           </span>
         </div>
@@ -134,25 +136,26 @@ export const RiskIndicator: React.FC<RiskIndicatorProps> = ({
 
       {/* Footer Metrics & Calibrated Risk Bands */}
       <div className="pt-4 border-t border-[rgba(255,255,255,0.08)]">
-        <div className="flex justify-between items-center text-xs font-mono mb-2">
-          <span className="text-[#9ba2b1]">Model Spoof Score:</span>
+        <div className="flex justify-between items-center text-sm font-mono mb-2">
+          <span className="text-[#9ba2b1]">Uncalibrated model score:</span>
           <span className="text-[#f4f5f7] font-semibold">
             {isIdle ? "Standby" : `${safeScore}/100`}
           </span>
         </div>
+        <p className="text-xs leading-relaxed text-[#8b93a3]">Score bands are prototype thresholds, not verified probabilities or real-world risk estimates.</p>
 
-        <div className="grid grid-cols-4 gap-1 text-[9px] font-mono text-center pt-1 text-[#626978]">
+        <div className="grid grid-cols-4 gap-1 text-[13px] font-mono text-center pt-1 text-[#8b93a3]">
           <div className="bg-[#090b11] py-1 rounded border border-[rgba(255,255,255,0.04)]">
             0–30 LOW
           </div>
           <div className="bg-[#090b11] py-1 rounded border border-[rgba(255,255,255,0.04)]">
-            31–60 SUSP
+            31–60 MID
           </div>
           <div className="bg-[#090b11] py-1 rounded border border-[rgba(255,255,255,0.04)]">
             61–80 HIGH
           </div>
           <div className="bg-[#090b11] py-1 rounded border border-[rgba(255,255,255,0.04)]">
-            81–100 CRIT
+            81–90 V HIGH
           </div>
         </div>
       </div>

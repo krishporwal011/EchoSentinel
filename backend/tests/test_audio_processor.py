@@ -14,7 +14,7 @@ def test_empty_audio_bytes():
         decode_and_preprocess_audio(b'')
 
 def test_tiny_audio_bytes():
-    with pytest.raises(ValueError, match='too small'):
+    with pytest.raises(ValueError, match='decoding failed'):
         decode_and_preprocess_audio(b'RIFF1234')
 
 def test_corrupted_audio_bytes():
@@ -79,3 +79,13 @@ def test_stereo_to_mono_downmixing():
 
     processed = decode_and_preprocess_audio(wav_bytes, target_sr=16000)
     assert processed.ndim == 1
+
+def test_audio_details_preserve_source_metadata_and_raw_level():
+    sr = 22050
+    signal = (0.2 * np.sin(2 * np.pi * 300 * np.arange(sr) / sr)).astype(np.float32)
+    processed, details = decode_and_preprocess_audio(make_wav_bytes(signal, sr), return_details=True)
+    assert details['source_sample_rate'] == sr
+    assert details['sample_rate'] == 16000
+    assert details['channels'] == 1
+    assert abs(details['duration_seconds'] - 1.0) < 0.01
+    assert np.max(np.abs(processed)) > np.max(np.abs(details['analysis_waveform']))

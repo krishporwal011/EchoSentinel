@@ -1,143 +1,97 @@
-"""
-Comprehensive end-to-end integration test against live running backend and frontend servers.
-Validates clean voice, AI voice, acoustic degradations, warnings, and web UI integration.
-"""
+"""Opt-in checks against the local running EchoSentinel API (never an external host)."""
 
-import requests
-import json
+import ipaddress
+import os
 from pathlib import Path
+from urllib.parse import urlsplit
 
-def main():
-    print("=" * 70)
-    print("      ECHOSENTINEL COMPREHENSIVE LIVE END-TO-END TEST")
-    print("=" * 70)
+import pytest
+import requests
 
-    # 1. Test Backend Root
-    res_root = requests.get("http://127.0.0.1:8000/")
-    print(f"[1] Root endpoint: HTTP {res_root.status_code}")
-    assert res_root.status_code == 200
 
-    # 2. Test Backend Health
-    res_health = requests.get("http://127.0.0.1:8000/health")
-    print(f"[2] Health endpoint: HTTP {res_health.status_code} -> model_loaded: {res_health.json().get('model_loaded')}")
-    assert res_health.status_code == 200
-    assert res_health.json()["model_loaded"] is True
+API_BASE_URL = os.getenv("ECHOSENTINEL_API_BASE_URL", "http://127.0.0.1:8037").rstrip("/")
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
-    # 3. Test Backend CORS Headers
-    res_cors = requests.options("http://127.0.0.1:8000/detect", headers={
-        "Origin": "http://localhost:3000",
-        "Access-Control-Request-Method": "POST"
-    })
-    allow_origin = res_cors.headers.get("access-control-allow-origin")
-    print(f"[3] CORS preflight: HTTP {res_cors.status_code} -> Allow-Origin: {allow_origin}")
-    assert allow_origin == "http://localhost:3000"
 
-    # 4. Test Clean Genuine Voice (Heather)
-    p_heather = Path("tests/audio/genuine/human_female_heather.wav")
-    with open(p_heather, "rb") as f:
-        res = requests.post("http://127.0.0.1:8000/detect", files={"file": ("heather.wav", f, "audio/wav")})
-    d = res.json()
-    print(f"\n[4] Clean Genuine Voice (Heather): HTTP {res.status_code}")
-    print(f"    - Final Decision:      {d.get('prediction')}")
-    print(f"    - Model Spoof Score:   {d.get('model_spoof_score')}")
-    print(f"    - Audio Quality Score: {d.get('audio_quality_score')}/100 ({d.get('audio_quality_rating')})")
-    print(f"    - Reliability:         {d.get('detection_reliability')}")
-    print(f"    - Quality Warning:     {d.get('quality_warning')}")
-    assert res.status_code == 200
-    assert d.get("prediction") == "authentic"
-    assert d.get("detection_reliability") == "HIGH"
-    assert d.get("quality_warning") is None
+def _assert_loopback_url(url: str) -> None:
+    parsed = urlsplit(url)
+    hostname = parsed.hostname
+    if parsed.scheme not in {"http", "https"} or not hostname:
+        pytest.fail("ECHOSENTINEL_API_BASE_URL must be a valid local HTTP(S) URL.")
+    try:
+        is_loopback = ipaddress.ip_address(hostname).is_loopback
+    except ValueError:
+        is_loopback = hostname.lower() == "localhost"
+    if not is_loopback:
+        pytest.fail("Live E2E tests are restricted to localhost/loopback; no external service is contacted.")
 
-    # 5. Test Clean AI Voice (Executive Transfer)
-    p_ai = Path("tests/audio/spoof/ai_guy_executive_transfer.mp3")
-    with open(p_ai, "rb") as f:
-        res = requests.post("http://127.0.0.1:8000/detect", files={"file": ("guy.mp3", f, "audio/mpeg")})
-    d = res.json()
-    print(f"\n[5] Clean AI Voice (Executive Transfer): HTTP {res.status_code}")
-    print(f"    - Final Decision:      {d.get('prediction')}")
-    print(f"    - Model Spoof Score:   {d.get('model_spoof_score')}")
-    print(f"    - Audio Quality Score: {d.get('audio_quality_score')}/100 ({d.get('audio_quality_rating')})")
-    print(f"    - Reliability:         {d.get('detection_reliability')}")
-    print(f"    - Risk Level:          {d.get('risk_level')}")
-    assert res.status_code == 200
-    assert d.get("prediction") == "AI-generated"
-    assert d.get("detection_reliability") == "HIGH"
-    assert d.get("risk_level") in ["High", "Critical"]
 
-    # 6. Test Noisy Genuine Voice (SNR +15dB)
-    p_noisy = Path("tests/audio/genuine/human_male_noisy_snr15db.wav")
-    with open(p_noisy, "rb") as f:
-        res = requests.post("http://127.0.0.1:8000/detect", files={"file": ("noisy.wav", f, "audio/wav")})
-    d = res.json()
-    print(f"\n[6] Noisy Genuine Voice (+15dB SNR): HTTP {res.status_code}")
-    print(f"    - Final Decision:      {d.get('prediction')}")
-    print(f"    - Raw Model Pred:      {d.get('raw_model_prediction')}")
-    print(f"    - Audio Quality Score: {d.get('audio_quality_score')}/100 ({d.get('audio_quality_rating')})")
-    print(f"    - Reliability:         {d.get('detection_reliability')}")
-    print(f"    - Quality Warning:     {d.get('quality_warning')}")
-    assert res.status_code == 200
-    assert d.get("detection_reliability") == "LOW"
-    assert d.get("prediction") == "Possible spoof"
-    assert "background noise" in d.get("quality_warning", "").lower()
+@pytest.fixture(scope="module", autouse=True)
+def local_api_ready():
+    _assert_loopback_url(API_BASE_URL)
+    try:
+        response = requests.get(f"{API_BASE_URL}/health", timeout=2)
+    except requests.RequestException as exc:
+        pytest.skip(f"Local EchoSentinel API unavailable at {API_BASE_URL}: {exc}")
+    if response.status_code == 503:
+        pytest.skip(f"Local EchoSentinel API is reachable at {API_BASE_URL}, but its model is unavailable.")
+    assert response.status_code == 200, f"Health endpoint returned HTTP {response.status_code}: {response.text}"
+    health = response.json()
+    assert health.get("model_loaded") is True, f"API health did not confirm a loaded model: {health}"
 
-    # 7. Test Reverberant Genuine Voice (Room Reflections)
-    p_rev = Path("tests/audio/genuine/human_female_reverberant_room.wav")
-    with open(p_rev, "rb") as f:
-        res = requests.post("http://127.0.0.1:8000/detect", files={"file": ("rev.wav", f, "audio/wav")})
-    d = res.json()
-    print(f"\n[7] Reverberant Genuine Voice (Echo): HTTP {res.status_code}")
-    print(f"    - Final Decision:      {d.get('prediction')}")
-    print(f"    - Audio Quality Score: {d.get('audio_quality_score')}/100 ({d.get('audio_quality_rating')})")
-    print(f"    - Reliability:         {d.get('detection_reliability')}")
-    print(f"    - Quality Warning:     {d.get('quality_warning')}")
-    assert res.status_code == 200
-    assert d.get("detection_reliability") == "LOW"
-    assert d.get("prediction") == "Possible spoof"
-    assert "reverberation" in d.get("quality_warning", "").lower()
 
-    # 8. Test Telephone-Filtered Genuine Voice (8kHz Bandpass)
-    p_phone = Path("tests/audio/genuine/human_male_phone_filtered_8k.wav")
-    with open(p_phone, "rb") as f:
-        res = requests.post("http://127.0.0.1:8000/detect", files={"file": ("phone.wav", f, "audio/wav")})
-    d = res.json()
-    print(f"\n[8] Telephone-Quality Genuine Voice (8kHz): HTTP {res.status_code}")
-    print(f"    - Final Decision:      {d.get('prediction')}")
-    print(f"    - Audio Quality Score: {d.get('audio_quality_score')}/100 ({d.get('audio_quality_rating')})")
-    print(f"    - Reliability:         {d.get('detection_reliability')}")
-    print(f"    - Quality Warning:     {d.get('quality_warning')}")
-    assert res.status_code == 200
-    assert d.get("detection_reliability") == "LOW"
-    assert d.get("prediction") == "Possible spoof"
-    assert "telephone" in d.get("quality_warning", "").lower()
+def test_live_audio_upload_uses_current_nested_response_contract():
+    audio_path = PROJECT_ROOT / "tests" / "audio" / "genuine" / "human_female_heather.wav"
+    assert audio_path.is_file(), f"Required local audio fixture is missing: {audio_path}"
 
-    # 9. Test Degraded AI Voice (Verification that AI does not become "authentic")
-    p_ai_noisy = Path("tests/audio/spoof/ai_guy_noisy_snr15db.wav")
-    with open(p_ai_noisy, "rb") as f:
-        res = requests.post("http://127.0.0.1:8000/detect", files={"file": ("ai_noisy.wav", f, "audio/wav")})
-    d = res.json()
-    print(f"\n[9] Degraded AI Voice (+15dB SNR): HTTP {res.status_code}")
-    print(f"    - Final Decision:      {d.get('prediction')}")
-    print(f"    - Reliability:         {d.get('detection_reliability')}")
-    print(f"    - Quality Warning:     {d.get('quality_warning')}")
-    assert res.status_code == 200
-    assert d.get("prediction") != "authentic"
-    assert d.get("prediction") == "Possible spoof"
-    assert d.get("detection_reliability") == "LOW"
+    with audio_path.open("rb") as audio_file:
+        response = requests.post(
+            f"{API_BASE_URL}/detect",
+            files={"file": (audio_path.name, audio_file, "audio/wav")},
+            timeout=90,
+        )
 
-    # 10. Test Frontend Web Pages
-    res_home = requests.get("http://localhost:3000/")
-    res_detect = requests.get("http://localhost:3000/detection")
-    res_verify = requests.get("http://localhost:3000/verification")
-    print(f"\n[10] Frontend Home Page: HTTP {res_home.status_code}")
-    print(f"[11] Frontend Detection Page: HTTP {res_detect.status_code}")
-    print(f"[12] Frontend Verification Page: HTTP {res_verify.status_code}")
-    assert res_home.status_code == 200
-    assert res_detect.status_code == 200
-    assert res_verify.status_code == 200
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["success"] is True
+    assert data["processing_status"] == "completed"
+    assert data["model"]["inference_completed"] is True
+    assert data["prediction"]["label"] in {
+        "likely_ai_generated",
+        "likely_human_recorded",
+        "inconclusive",
+    }
+    assert data["prediction"]["probability_type"] == "uncalibrated_softmax"
+    ai_score = data["prediction"]["ai_probability"]
+    human_score = data["prediction"]["human_probability"]
+    assert 0 <= ai_score <= 1
+    assert 0 <= human_score <= 1
+    assert ai_score + human_score == pytest.approx(1.0, abs=1e-4)
+    assert data["audio"]["duration_seconds"] > 0
+    assert data["audio"]["sample_rate"] == 16000
 
-    print("\n" + "=" * 70)
-    print("   ALL COMPREHENSIVE LIVE END-TO-END CHECKS PASSED (12/12)!")
-    print("=" * 70)
 
-if __name__ == "__main__":
-    main()
+def test_live_api_returns_structured_error_for_unsupported_file_type():
+    response = requests.post(
+        f"{API_BASE_URL}/detect",
+        files={"file": ("not-audio.txt", b"not audio", "text/plain")},
+        timeout=15,
+    )
+    assert response.status_code == 415
+    data = response.json()
+    assert data["success"] is False
+    assert data["error"]["code"] == "unsupported_media_type"
+    assert data["error"]["message"]
+
+
+def test_live_api_returns_structured_error_for_corrupt_audio():
+    response = requests.post(
+        f"{API_BASE_URL}/detect",
+        files={"file": ("corrupt.wav", b"not a valid wav file", "audio/wav")},
+        timeout=30,
+    )
+    assert response.status_code == 400
+    data = response.json()
+    assert data["success"] is False
+    assert data["error"]["code"] == "invalid_audio"
+    assert "decod" in data["error"]["message"].lower()

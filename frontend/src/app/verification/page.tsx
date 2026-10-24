@@ -1,135 +1,99 @@
 "use client";
 
 import React, { useState } from "react";
-import { KeyRound, ShieldAlert, CheckCircle2, XCircle, RotateCcw } from "lucide-react";
 import { PageTransition } from "../../components/PageTransition";
-import { CHALLENGE_PHRASES } from "../../lib/content";
+import { LinkSecurityScanner } from "../../components/LinkSecurityScanner";
+import { ShieldCheck, Link as LinkIcon, UserCheck, AlertCircle } from "lucide-react";
 
 export default function VerificationPage() {
-  const [phraseIndex, setPhraseIndex] = useState(0);
-  const [status, setStatus] = useState<"ready" | "verifying" | "passed" | "blocked">("ready");
-
-  const currentPhrase = CHALLENGE_PHRASES[phraseIndex % CHALLENGE_PHRASES.length];
-
-  const handleNextPhrase = () => {
-    setPhraseIndex((prev) => prev + 1);
-    setStatus("ready");
-  };
-
-  const handleVerify = (pass: boolean) => {
-    setStatus("verifying");
-    setTimeout(() => {
-      setStatus(pass ? "passed" : "blocked");
-    }, 600);
-  };
+  const [activeTab, setActiveTab] = useState<"link_scanner" | "voice_identity">("link_scanner");
 
   return (
     <PageTransition>
-      <div className="max-w-4xl mx-auto px-5 sm:px-8 py-6 space-y-10">
-        {/* Page Header */}
-        <div className="space-y-3">
-          <span className="text-[10px] font-mono tracking-widest text-[#66b7ff] uppercase block">
-            PREVENTION LAYER • PROTOTYPE
-          </span>
-          <h1 className="font-serif-cinematic text-4xl sm:text-5xl text-[#f4f5f7]">
-            Prototype Verification Gate
-          </h1>
-          <p className="text-sm text-[#9ba2b1] max-w-xl">
-            Demonstration of step-up defense: when high or critical acoustic clone risk is identified,
-            EchoSentinel halts sensitive operations. Automatic speech-to-text and vocal biometrics are
-            simulated for this prototype workflow.
-          </p>
+      <main className="mx-auto max-w-4xl space-y-10 px-5 py-6 sm:px-8">
+        {/* Verification Hub Navigation Tabs */}
+        <div className="flex flex-wrap items-center gap-3 p-1.5 rounded-2xl bg-[#111520] border border-[rgba(255,255,255,0.1)] w-fit">
+          <button
+            type="button"
+            onClick={() => setActiveTab("link_scanner")}
+            className={`px-5 py-2.5 rounded-xl font-mono text-xs tracking-wider font-semibold transition-all flex items-center gap-2 cursor-pointer ${
+              activeTab === "link_scanner"
+                ? "bg-[#66b7ff] text-[#090b11] shadow-md"
+                : "text-[#9ba2b1] hover:text-white"
+            }`}
+          >
+            <LinkIcon size={14} />
+            <span>LINK SECURITY SCANNER</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab("voice_identity")}
+            className={`px-5 py-2.5 rounded-xl font-mono text-xs tracking-wider font-semibold transition-all flex items-center gap-2 cursor-pointer ${
+              activeTab === "voice_identity"
+                ? "bg-[#66b7ff] text-[#090b11] shadow-md"
+                : "text-[#9ba2b1] hover:text-white"
+            }`}
+          >
+            <UserCheck size={14} />
+            <span>IDENTITY VERIFICATION</span>
+          </button>
         </div>
 
-        {/* Interactive Challenge Testing Card */}
-        <div className="bg-[#111520] border border-[rgba(255,255,255,0.12)] rounded-2xl p-6 sm:p-8 space-y-6 shadow-xl">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="p-2.5 rounded-xl bg-[#66b7ff]/10 text-[#66b7ff] border border-[#66b7ff]/20">
-                <KeyRound size={20} />
+        {/* Tab 1: LINK SECURITY SCANNER (VirusTotal Threat Intelligence) */}
+        {activeTab === "link_scanner" && (
+          <section aria-label="Link Security Scanner">
+            <LinkSecurityScanner />
+          </section>
+        )}
+
+        {/* Tab 2: VOICE IDENTITY VERIFICATION (Preserved Voice Safety Notice) */}
+        {activeTab === "voice_identity" && (
+          <section className="space-y-8" aria-label="Voice Identity Verification">
+            <header className="space-y-3">
+              <span className="block text-xs font-mono uppercase tracking-widest text-[#66b7ff] font-semibold">
+                VOICE IDENTITY VERIFICATION
+              </span>
+              <h1 className="text-3xl sm:text-5xl font-serif-cinematic font-semibold text-[#f4f5f7]">
+                Identity checks are not enabled
+              </h1>
+              <p className="max-w-2xl text-sm sm:text-base leading-relaxed text-[#9ba2b1]">
+                EchoSentinel analyzes audio for patterns associated with synthetic speech. It does not verify a speaker’s biological identity or ask you to pass or block a challenge.
+              </p>
+            </header>
+
+            <div className="rounded-2xl border border-white/10 bg-[#111520] p-6 sm:p-8 text-sm sm:text-base leading-relaxed text-[#cbd5e1] space-y-4 shadow-xl">
+              <div className="flex items-center gap-2.5 text-[#66b7ff] font-mono text-xs tracking-wider uppercase font-semibold">
+                <AlertCircle size={16} />
+                <span>Operational Guidance</span>
               </div>
-              <h2 className="text-base font-mono font-semibold text-[#f4f5f7]">
-                DYNAMIC CHALLENGE PROTOCOL
-              </h2>
+              <p>
+                Treat acoustic detection results as estimates. For an urgent or sensitive financial, authorization, or personal voice request, always contact the person through a trusted, independent out-of-band communication channel.
+              </p>
             </div>
-            <button
-              type="button"
-              onClick={handleNextPhrase}
-              className="text-xs font-mono text-[#9ba2b1] hover:text-[#f4f5f7] flex items-center gap-1.5"
-            >
-              <RotateCcw size={12} />
-              <span>NEW PHRASE</span>
-            </button>
-          </div>
 
-          <div className="p-6 rounded-xl bg-[#090b11] border border-[rgba(255,255,255,0.08)] text-center">
-            <span className="text-[10px] font-mono text-[#626978] uppercase tracking-widest block mb-2">
-              PROMPT TO ARTICULATE
-            </span>
-            <div className="font-serif-cinematic text-2xl sm:text-3xl text-[#f4f5f7]">
-              "Say: {currentPhrase}"
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="p-5 rounded-2xl bg-[#090b11] border border-white/10 space-y-2">
+                <span className="text-xs font-mono text-[#70d6a0] uppercase tracking-wider block font-medium">
+                  What EchoSentinel Detects
+                </span>
+                <p className="text-xs text-[#9ba2b1] leading-relaxed">
+                  Deep neural voice cloning artifacts, phase cancellation anomalies, vocoder spectral glints, and synthetic speech synthesis.
+                </p>
+              </div>
+
+              <div className="p-5 rounded-2xl bg-[#090b11] border border-white/10 space-y-2">
+                <span className="text-xs font-mono text-[#e66d76] uppercase tracking-wider block font-medium">
+                  What It Does Not Do
+                </span>
+                <p className="text-xs text-[#9ba2b1] leading-relaxed">
+                  Does not prove legal identity, biometric speaker ownership, passport validation, or banking credential checks.
+                </p>
+              </div>
             </div>
-          </div>
-
-          {/* Verification Status */}
-          {status === "verifying" && (
-            <div className="p-4 rounded-xl bg-[#181c27] text-center font-mono text-xs text-[#8ddcff] animate-pulse">
-              ANALYZING AUDIO RESPONSE...
-            </div>
-          )}
-
-          {status === "passed" && (
-            <div className="p-4 rounded-xl bg-[#70d6a0]/10 border border-[#70d6a0]/30 text-[#70d6a0] flex items-center justify-center gap-2 font-mono text-xs font-semibold">
-              <CheckCircle2 size={16} />
-              <span>CHALLENGE VERIFIED • SENSITIVE FLOW UNLOCKED</span>
-            </div>
-          )}
-
-          {status === "blocked" && (
-            <div className="p-4 rounded-xl bg-[#e66d76]/10 border border-[#e66d76]/30 text-[#e66d76] flex items-center justify-center gap-2 font-mono text-xs font-semibold">
-              <XCircle size={16} />
-              <span>CHALLENGE FAILED • SENSITIVE FLOW BLOCKED</span>
-            </div>
-          )}
-
-          {/* Action Buttons */}
-          <div className="flex flex-wrap items-center justify-end gap-3 pt-2">
-            <button
-              type="button"
-              onClick={() => handleVerify(false)}
-              className="px-5 py-2.5 rounded-xl border border-[#e66d76]/30 bg-[#e66d76]/10 hover:bg-[#e66d76]/20 text-[#e66d76] font-mono text-xs transition-colors"
-            >
-              Simulate Failure (Block)
-            </button>
-            <button
-              type="button"
-              onClick={() => handleVerify(true)}
-              className="px-6 py-2.5 rounded-xl bg-[#70d6a0] hover:bg-[#70d6a0]/90 text-[#090b11] font-mono text-xs font-semibold transition-colors flex items-center gap-1.5"
-            >
-              <CheckCircle2 size={15} />
-              <span>Simulate Pass (Continue)</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Explainers */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs text-[#9ba2b1]">
-          <div className="p-5 rounded-xl bg-[#111520] border border-[rgba(255,255,255,0.08)] space-y-2">
-            <h3 className="font-mono text-[#f4f5f7] font-semibold text-xs">Dynamic Entropy</h3>
-            <p className="leading-relaxed">
-              Randomized challenge phrases prevent replay attacks where malicious agents play back
-              pre-recorded legitimate voicemails or samples.
-            </p>
-          </div>
-          <div className="p-5 rounded-xl bg-[#111520] border border-[rgba(255,255,255,0.08)] space-y-2">
-            <h3 className="font-mono text-[#f4f5f7] font-semibold text-xs">Human Oversight Gate</h3>
-            <p className="leading-relaxed">
-              Verification acts as a decisive step-up gate. If the challenge fails, high-value transfers,
-              credential resets, or sensitive actions remain locked.
-            </p>
-          </div>
-        </div>
-      </div>
+          </section>
+        )}
+      </main>
     </PageTransition>
   );
 }

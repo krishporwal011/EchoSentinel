@@ -1,17 +1,11 @@
 import type { Metadata } from "next";
-import { Cormorant_Garamond, Inter } from "next/font/google";
+import { Inter } from "next/font/google";
 import "./globals.css";
 import { GrainOverlay } from "../components/GrainOverlay";
 import { CustomCursor } from "../components/CustomCursor";
 import { CinematicBackground } from "../components/CinematicBackground";
 import { Navbar } from "../components/Navbar";
-
-const cormorant = Cormorant_Garamond({
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
-  variable: "--font-serif",
-  display: "swap",
-});
+import { UpcomingFeatureModal } from "../components/UpcomingFeatureModal";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -30,7 +24,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className={`${cormorant.variable} ${inter.variable} dark`}>
+    <html lang="en" className={`${inter.variable} dark`}>
       <head>
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
       </head>
@@ -47,6 +41,9 @@ export default function RootLayout({
         <main className="relative z-10 flex flex-col min-h-screen pt-20 sm:pt-24">
           {children}
         </main>
+
+        {/* Global Upcoming Feature Modal for Live / Start Detection */}
+        <UpcomingFeatureModal />
       </body>
     </html>
   );

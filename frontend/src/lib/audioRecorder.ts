@@ -18,6 +18,8 @@ export class AudioStreamRecorder {
   private analyserNode: AnalyserNode | null = null;
   private processorNode: ScriptProcessorNode | null = null;
   private isRecording = false;
+  private isStarting = false;
+  private stopRequested = false;
   private sequenceCounter = 0;
   private sampleRate = 16000;
   private pcmChunks: Float32Array[] = [];
@@ -34,11 +36,13 @@ export class AudioStreamRecorder {
   }
 
   public async start(): Promise<void> {
-    if (this.isRecording) return;
+    if (this.isRecording || this.isStarting) return;
+    this.isStarting = true;
+    this.stopRequested = false;
 
     try {
       // 1. Request microphone access
-      this.mediaStream = await navigator.mediaDevices.getUserMedia({
+      const mediaStream = await navigator.mediaDevices.getUserMedia({
         audio: {
           channelCount: 1,
           echoCancellation: true,
@@ -47,6 +51,11 @@ export class AudioStreamRecorder {
         },
         video: false,
       });
+      if (this.stopRequested) {
+        mediaStream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+      this.mediaStream = mediaStream;
 
       // 2. Initialize AudioContext with fallback (some browsers reject explicit sampleRate)
       const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
@@ -59,6 +68,7 @@ export class AudioStreamRecorder {
       if (this.audioContext.state === "suspended") {
         await this.audioContext.resume();
       }
+      if (this.stopRequested) return;
 
       this.sampleRate = this.audioContext.sampleRate;
       this.sourceNode = this.audioContext.createMediaStreamSource(this.mediaStream);
@@ -103,12 +113,15 @@ export class AudioStreamRecorder {
       }, intervalMs);
 
     } catch (err) {
+      if (this.stopRequested) return;
       this.stop();
       const error = err instanceof Error ? err : new Error(String(err));
       if (this.options.onError) {
         this.options.onError(error);
       }
       throw error;
+    } finally {
+      this.isStarting = false;
     }
   }
 
@@ -154,6 +167,7 @@ export class AudioStreamRecorder {
   }
 
   public stop(): void {
+    this.stopRequested = true;
     this.isRecording = false;
 
     if (this.chunkTimer) {

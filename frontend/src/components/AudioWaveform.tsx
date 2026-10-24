@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useEffect, useRef } from "react";
+import React, { useCallback, useEffect, useRef } from "react";
+import { triggerUpcomingFeatureModal } from "./UpcomingFeatureModal";
 
 interface AudioWaveformProps {
   isRecording: boolean;
@@ -19,7 +20,7 @@ export const AudioWaveform: React.FC<AudioWaveformProps> = ({
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  const getWaveColor = () => {
+  const getWaveColor = useCallback(() => {
     if (!isRecording) return "#626978"; // text-muted
     switch (riskLevel) {
       case "Critical":
@@ -32,7 +33,7 @@ export const AudioWaveform: React.FC<AudioWaveformProps> = ({
       default:
         return "#70d6a0";
     }
-  };
+  }, [isRecording, riskLevel]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -41,7 +42,7 @@ export const AudioWaveform: React.FC<AudioWaveformProps> = ({
     if (!ctx) return;
 
     let animId: number;
-    let dpr = window.devicePixelRatio || 1;
+    const dpr = window.devicePixelRatio || 1;
     let width = (canvas.width = canvas.parentElement?.clientWidth || 600) * dpr;
     let height = (canvas.height = (canvas.parentElement?.clientHeight || 120)) * dpr;
     ctx.scale(dpr, dpr);
@@ -122,7 +123,7 @@ export const AudioWaveform: React.FC<AudioWaveformProps> = ({
       cancelAnimationFrame(animId);
       window.removeEventListener("resize", handleResize);
     };
-  }, [isRecording, waveformData, riskLevel]);
+  }, [isRecording, waveformData, riskLevel, getWaveColor]);
 
   const formattedChunk = String(chunkNumber).padStart(2, "0");
 
@@ -131,22 +132,31 @@ export const AudioWaveform: React.FC<AudioWaveformProps> = ({
       <canvas ref={canvasRef} className="w-full h-full block" />
 
       {/* Top Left: Real-time Audio Stream Status */}
-      <div className="absolute top-2.5 left-3.5 flex items-center gap-2 pointer-events-none">
+      <button
+        type="button"
+        onClick={() => triggerUpcomingFeatureModal({
+          title: "It is an upcoming feature of EchoSentinel Team India ❤️",
+          message: "Live Detection & continuous microphone streaming is currently an upcoming feature being engineered by EchoSentinel Team India ❤️. You can test voice detection right now by uploading audio files or trying our instant sample datasets!",
+        })}
+        className="absolute top-2.5 left-3.5 flex items-center gap-2 cursor-pointer group bg-transparent border-0 p-0 text-left"
+        title="Live Detection - Upcoming Feature ❤️"
+      >
         <span
           className={`inline-block w-2 h-2 rounded-full ${
             isRecording ? "bg-[#70d6a0] animate-pulse" : "bg-[#626978]"
           }`}
         />
-        <span className="text-[10px] font-mono tracking-widest text-[#9ba2b1] uppercase">
-          {isRecording ? "LIVE 16 KHZ PCM" : "SENSOR INACTIVE"}
+        <span className="text-[12px] font-mono tracking-widest text-[#9ba2b1] group-hover:text-white uppercase transition-colors flex items-center gap-1.5">
+          <span>{isRecording ? "LIVE 16 KHZ PCM" : "LIVE AUDIO SENSOR"}</span>
+          <span className="text-[10px] text-[#ff9933] font-sans">❤️</span>
         </span>
-      </div>
+      </button>
 
       {/* Top Right: Discrete Chunk Processing Indicator */}
       {isRecording && (
-        <div className="absolute top-2.5 right-3.5 flex items-center gap-1.5 px-2 py-0.5 rounded bg-[#181c27] border border-[rgba(255,255,255,0.12)] text-[10px] font-mono">
+        <div className="absolute top-2.5 right-3.5 flex items-center gap-1.5 px-2 py-0.5 rounded bg-[#181c27] border border-[rgba(255,255,255,0.12)] text-[12px] font-mono">
           <span className="text-[#9ba2b1]">CHUNK {formattedChunk}</span>
-          <span className="text-[#626978]">•</span>
+          <span className="text-[#8b93a3]">•</span>
           <span className={isAnalyzing ? "text-[#8ddcff] animate-pulse" : "text-[#70d6a0]"}>
             {isAnalyzing ? "ANALYZING..." : "ANALYZED"}
           </span>
@@ -154,7 +164,7 @@ export const AudioWaveform: React.FC<AudioWaveformProps> = ({
       )}
 
       {/* Bottom Right: FFT Spec */}
-      <div className="absolute bottom-2 right-3.5 text-[9px] font-mono text-[#626978] pointer-events-none">
+      <div className="absolute bottom-2 right-3.5 text-[13px] font-mono text-[#8b93a3] pointer-events-none">
         512 FFT • MONO WAV STREAM
       </div>
     </div>

@@ -1,223 +1,184 @@
-"""
-Evaluation benchmark for EchoSentinel Voice Deepfake Detector.
-Evaluates both RAW MODEL PREDICTION and QUALITY-AWARE APPLICATION DECISION
-across genuine speech (clean, telephone, compressed, noisy, reverberant)
-and synthetic AI voice samples (Edge Neural TTS, Google TTS).
-"""
+#!/usr/bin/env python3
+"""Reproducible offline evaluation using the EchoSentinel model and preprocessing."""
 
-import os
+import argparse
+import json
 import sys
-import time
 from pathlib import Path
-import soundfile as sf
-import librosa
+from typing import Any
 
-# Add backend directory to path
-BACKEND_DIR = Path(__file__).resolve().parent.parent / "backend"
-sys.path.insert(0, str(BACKEND_DIR))
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "backend"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from audio_processor import decode_and_preprocess_audio
-from audio_quality import analyze_audio_quality, determine_application_decision
+from audio_quality import analyze_audio_quality
 from model import VoiceCloneDetector
+from evaluation_tools import (
+    calculate_metrics,
+    grouped_metrics,
+    load_manifest,
+    threshold_sweep,
+    validate_manifest,
+    write_evaluation_report,
+)
 
 
-def evaluate():
-    print("=" * 125)
-    print(" " * 35 + "ECHOSENTINEL COMPREHENSIVE BENCHMARK EVALUATION")
-    print("=" * 125)
+REAL_WORLD_LIMITATION = (
+    "Exploratory fixture results only; these metrics are not estimates of real-world performance."
+)
+PRODUCTION_DECISION_THRESHOLD = 0.5
+DEFAULT_THRESHOLDS = [round(i / 20, 2) for i in range(21)]
 
-    # Initialize model
-    print("\n[+] Initializing VoiceCloneDetector...")
-    t0 = time.perf_counter()
+
+def _selected_samples(samples: list[dict[str, Any]], partition: str | None) -> list[dict[str, Any]]:
+    return [sample for sample in samples if partition is None or sample.get("partition") == partition]
+
+
+def evaluate(
+    manifest_path: Path,
+    dataset_root: Path,
+    partition: str | None = None,
+    output_dir: Path | None = None,
+    sweep: bool = False,
+    thresholds: list[float] | None = None,
+) -> dict[str, Any]:
+    if sweep and partition != "validation":
+        raise ValueError("Threshold sweeps are allowed only with --partition validation.")
+    if sweep and thresholds is not None and any(not 0 <= value <= 1 for value in thresholds):
+        raise ValueError("Every sweep threshold must be between 0 and 1.")
+
+    validation = validate_manifest(manifest_path, dataset_root)
+    if not validation["valid"]:
+        raise ValueError(f"Manifest validation failed: {json.dumps(validation['issues'], sort_keys=True)}")
+    samples, structural_issues = load_manifest(manifest_path)
+    if structural_issues:
+        raise ValueError(f"Manifest structure is invalid: {json.dumps(structural_issues, sort_keys=True)}")
+    selected = _selected_samples(samples, partition)
+    if not selected:
+        raise ValueError(f"No samples found for partition {partition!r}.")
+    if sweep and not any(sample.get("partition") == "validation" for sample in selected):
+        raise ValueError("No validation partition samples are available for threshold analysis.")
+
     detector = VoiceCloneDetector.get_instance()
     detector.load_model()
-    init_time = time.perf_counter() - t0
-    print(f"[+] Model initialized in {init_time:.2f}s on device: {detector.device}")
-
-    project_root = Path(__file__).resolve().parent.parent
-    genuine_dir = project_root / "tests" / "audio" / "genuine"
-    spoof_dir = project_root / "tests" / "audio" / "spoof"
-
-    # Core 22 benchmark files for exact BEFORE vs AFTER comparison
-    core_22_genuine = [
-        "human_female_compressed_vorbis.ogg",
-        "human_female_heather.wav",
-        "human_female_librispeech2.wav",
-        "human_female_librispeech4.ogg",
-        "human_female_reverberant_room.wav",
-        "human_male_anders.wav",
-        "human_male_garth.ogg",
-        "human_male_librispeech1.flac",
-        "human_male_librispeech3.flac",
-        "human_male_mlk_live.wav",
-        "human_male_noisy_snr15db.wav",
-        "human_male_phone_filtered_8k.wav"
-    ]
-
-    core_22_spoof = [
-        "ai_aria_neural_eval.flac",
-        "ai_brian_wire_fraud.wav",
-        "ai_christopher_auth_code.wav",
-        "ai_emma_tech_support.ogg",
-        "ai_gtts_password_reset_au.ogg",
-        "ai_gtts_security_verification.mp3",
-        "ai_gtts_wire_transfer_uk.wav",
-        "ai_guy_executive_transfer.mp3",
-        "ai_jenny_account_alert.wav",
-        "ai_sonia_banking_alert.flac"
-    ]
-
-    additional_spoof = [
-        "ai_guy_noisy_snr15db.wav",
-        "ai_jenny_reverberant_room.wav"
-    ]
-
-    def evaluate_sample(file_path: Path, expected_label: str):
-        audio_bytes = file_path.read_bytes()
-        t_start = time.perf_counter()
-        waveform, orig_sr = decode_and_preprocess_audio(audio_bytes, return_meta=True)
-        raw_res = detector.predict(waveform)
-        quality_res = analyze_audio_quality(waveform, sample_rate=16000, native_sample_rate=orig_sr)
-        decision = determine_application_decision(
-            raw_res["prediction"],
-            raw_res["model_spoof_score"],
-            quality_res
-        )
-        latency_ms = (time.perf_counter() - t_start) * 1000.0
-
-        # Raw model correctness
-        raw_correct = (raw_res["prediction"] == expected_label)
-
-        # Application decision correctness:
-        # If expected is authentic: final decision should be authentic (or recognized as low-reliability possible spoof)
-        # If expected is AI-generated: final decision should be AI-generated or possible spoof (never authentic)
-        if expected_label == "authentic":
-            app_correct = (decision["final_decision"] == "authentic")
+    rows: list[dict[str, Any]] = []
+    for sample in selected:
+        relative_path = Path(sample["audio_path"])
+        if relative_path.is_absolute():
+            # Legacy mode keeps absolute paths, but manifest paths must always be relative.
+            audio_path = relative_path
         else:
-            app_correct = (decision["final_decision"] in ["AI-generated", "Possible spoof"])
+            audio_path = dataset_root / relative_path
+        waveform, details = decode_and_preprocess_audio(audio_path.read_bytes(), return_details=True)
+        prediction = detector.predict(waveform, sample_rate=details["sample_rate"])
+        ai_score = float(prediction["ai_probability"])
+        bonafide_score = float(prediction["human_probability"])
+        if not (0 <= ai_score <= 1 and 0 <= bonafide_score <= 1):
+            raise RuntimeError(f"Model returned an invalid score for sample {sample['sample_id']}.")
+        predicted = "spoof" if ai_score >= bonafide_score else "bonafide"
 
-        return {
-            "filename": file_path.name,
-            "expected": expected_label,
-            "model_prediction": raw_res["prediction"],
-            "model_spoof_score": raw_res["model_spoof_score"],
-            "audio_quality": f"{quality_res['quality_score']}/100 ({quality_res['quality_rating']})",
-            "quality_score": quality_res["quality_score"],
-            "quality_flags": quality_res["flags"],
-            "final_decision": decision["final_decision"],
-            "reliability": decision["detection_reliability"],
-            "reliability_label": decision["reliability_label"],
-            "quality_warning": decision["quality_warning"],
-            "latency_ms": latency_ms,
-            "raw_correct": raw_correct,
-            "app_correct": app_correct
+        quality = analyze_audio_quality(
+            details["analysis_waveform"],
+            sample_rate=details["sample_rate"],
+            native_sample_rate=details["source_sample_rate"],
+        )
+        measurement = {item["id"]: item["value"] for item in quality.get("measurements", [])}
+        row = {
+            "sample_id": sample["sample_id"],
+            "audio_path": sample["audio_path"],
+            "partition": sample["partition"],
+            "ground_truth": sample["ground_truth"],
+            "predicted_label": predicted,
+            "bonafide_score": bonafide_score,
+            "spoof_score": ai_score,
+            "ai_probability": ai_score,
+            "duration_seconds": details["duration_seconds"],
+            "source_sample_rate": details["source_sample_rate"],
+            "source_channels": details["channels"],
+            "model_sample_rate": details["sample_rate"],
+            "model_waveform_samples": int(waveform.shape[0]),
+            "model_waveform_shape": [int(waveform.shape[0])],
+            "model_tensor_shape": [1, int(waveform.shape[0])],
+            "model_waveform_dtype": str(waveform.dtype),
+            "quality_rating": quality["quality_rating"],
+            "quality_score": quality["quality_score"],
+            "quality_reliability": quality["reliability"],
+            "quality_flags": quality.get("flags", []),
+            "clipped_samples_percent": measurement.get("clipped_samples"),
+            "peak_level_dbfs": measurement.get("peak_level"),
+            "level_variation_db": quality.get("level_variation_db"),
+            "dynamic_range_db": quality.get("dynamic_range_db"),
+            "high_frequency_share_percent": measurement.get("high_frequency_share"),
+            "quality_measurements": quality.get("measurements", []),
+            "recording_conditions": sample.get("recording_conditions", ["unknown"]),
+            "synthetic_generator": sample.get("synthetic_generator"),
+            "language": sample.get("language"),
         }
+        rows.append(row)
+        print(
+            f"{sample['sample_id']}\tactual={row['ground_truth']}\tpredicted={predicted}"
+            f"\tbonafide={bonafide_score:.6f}\tspoof={ai_score:.6f}"
+        )
 
-    print("\n[+] Evaluating Core 22-Sample Benchmark (12 Genuine, 10 Spoof)...")
-    results = []
-
-    for name in core_22_genuine:
-        p = genuine_dir / name
-        if p.exists():
-            results.append(evaluate_sample(p, "authentic"))
-
-    for name in core_22_spoof:
-        p = spoof_dir / name
-        if p.exists():
-            results.append(evaluate_sample(p, "AI-generated"))
-
-    # Print Table matching exact requested format:
-    # filename | expected | model prediction | model spoof score | audio quality | final decision | reliability | result
-    print("\n" + "=" * 145)
-    print(" " * 48 + "CORE 22-SAMPLE EVALUATION TABLE")
-    print("=" * 145)
-    header = f"{'Filename':<36} | {'Expected':<12} | {'Model Pred':<12} | {'Spoof%':<8} | {'Audio Qual':<15} | {'Final Decision':<20} | {'Reliability':<11} | {'Result':<6}"
-    print(header)
-    print("-" * 145)
-
-    for r in results:
-        spoof_pct = f"{r['model_spoof_score'] * 100:.2f}%"
-        result_badge = "PASS" if r["raw_correct"] else "FAIL"
-        print(f"{r['filename']:<36} | {r['expected']:<12} | {r['model_prediction']:<12} | {spoof_pct:<8} | {r['audio_quality']:<15} | {r['final_decision']:<20} | {r['reliability']:<11} | {result_badge:<6}")
-
-    # Compute Raw Model Metrics
-    raw_tp = sum(1 for r in results if r["expected"] == "AI-generated" and r["model_prediction"] == "AI-generated")
-    raw_fn = sum(1 for r in results if r["expected"] == "AI-generated" and r["model_prediction"] == "authentic")
-    raw_tn = sum(1 for r in results if r["expected"] == "authentic" and r["model_prediction"] == "authentic")
-    raw_fp = sum(1 for r in results if r["expected"] == "authentic" and r["model_prediction"] == "AI-generated")
-
-    raw_total = len(results)
-    raw_acc = (raw_tp + raw_tn) / raw_total if raw_total > 0 else 0.0
-    raw_prec = raw_tp / (raw_tp + raw_fp) if (raw_tp + raw_fp) > 0 else 0.0
-    raw_rec = raw_tp / (raw_tp + raw_fn) if (raw_tp + raw_fn) > 0 else 0.0
-    raw_f1 = (2 * raw_prec * raw_rec / (raw_prec + raw_rec)) if (raw_prec + raw_rec) > 0 else 0.0
-
-    print("\n" + "=" * 65)
-    print(" " * 18 + "RAW MODEL DETECTION METRICS")
-    print("=" * 65)
-    print(f"  Total Samples Evaluated:        {raw_total} (12 Genuine, 10 Spoof)")
-    print(f"  True Positives  (Spoof -> AI):  {raw_tp}")
-    print(f"  True Negatives  (Real -> Real): {raw_tn}")
-    print(f"  False Positives (Real -> AI):   {raw_fp}")
-    print(f"  False Negatives (Spoof -> Real):{raw_fn}")
-    print("-" * 65)
-    print(f"  Raw Model Accuracy:             {raw_acc * 100:.2f}%")
-    print(f"  Raw Model Precision:            {raw_prec * 100:.2f}%")
-    print(f"  Raw Model Recall:               {raw_rec * 100:.2f}%")
-    print(f"  Raw Model F1 Score:             {raw_f1 * 100:.2f}%")
-    print("=" * 65)
-
-    print("\nRaw Model Confusion Matrix:")
-    print(f"                 Actual AI        Actual Genuine")
-    print(f"  Pred AI        TP = {raw_tp:<11} FP = {raw_fp:<11}")
-    print(f"  Pred Genuine   FN = {raw_fn:<11} TN = {raw_tn:<11}")
-    print("=" * 65)
-
-    # Compute Application Reliability & Decision Breakdown
-    high_rel = [r for r in results if r["reliability"] == "HIGH"]
-    low_rel = [r for r in results if r["reliability"] == "LOW"]
-
-    print("\n" + "=" * 65)
-    print(" " * 16 + "APPLICATION QUALITY & RELIABILITY AUDIT")
-    print("=" * 65)
-    print(f"  High-Reliability Samples:       {len(high_rel)} / {len(results)}")
-    high_rel_acc = sum(1 for r in high_rel if r["raw_correct"]) / len(high_rel) if high_rel else 0.0
-    print(f"  - Accuracy on High-Rel Audio:   {high_rel_acc * 100:.2f}% (Only 1 FP: foreign prosody)")
-    print(f"  Low-Reliability Gated Samples:  {len(low_rel)} / {len(results)}")
-    print(f"  - Flagged for Noise / Channel:  {sum(1 for r in low_rel if 'high_background_noise' in r['quality_flags'] or 'narrowband_telephony' in r['quality_flags'] or 'reverberation_detected' in r['quality_flags'])}")
-    print(f"  - Successfully Gated (No False Confidence Claim): {len(low_rel)} / {len(low_rel)} (100%)")
-    print("=" * 65)
-
-    # Evaluate Additional Degraded AI Samples (Item 6)
-    print("\n[+] Evaluating Additional Degraded AI Voice Samples...")
-    add_results = []
-    for name in additional_spoof:
-        p = spoof_dir / name
-        if p.exists():
-            add_results.append(evaluate_sample(p, "AI-generated"))
-
-    if add_results:
-        print("\n" + "-" * 145)
-        print("ADDITIONAL DEGRADED AI SAMPLES (Verification that degraded AI audio does NOT become 'authentic'):")
-        print("-" * 145)
-        for r in add_results:
-            spoof_pct = f"{r['model_spoof_score'] * 100:.2f}%"
-            print(f"{r['filename']:<36} | {r['expected']:<12} | {r['model_prediction']:<12} | {spoof_pct:<8} | {r['audio_quality']:<15} | {r['final_decision']:<20} | {r['reliability']:<11} | {'PASS':<6}")
-        print("-" * 145)
-
-    return {
-        "raw_accuracy": raw_acc,
-        "raw_precision": raw_prec,
-        "raw_recall": raw_rec,
-        "raw_f1": raw_f1,
-        "raw_tp": raw_tp,
-        "raw_tn": raw_tn,
-        "raw_fp": raw_fp,
-        "raw_fn": raw_fn,
-        "results": results,
-        "additional_results": add_results
+    metrics = calculate_metrics(rows, PRODUCTION_DECISION_THRESHOLD)
+    report: dict[str, Any] = {
+        "model": detector.model_id,
+        "model_revision": getattr(detector.model.config, "_commit_hash", None),
+        "label_mapping": detector.label_mapping,
+        "partition": partition or "all_manifest_partitions",
+        "threshold": PRODUCTION_DECISION_THRESHOLD,
+        "metrics": metrics,
+        "groups": grouped_metrics(rows, PRODUCTION_DECISION_THRESHOLD),
+        "false_positives": [row["sample_id"] for row in rows if row["ground_truth"] == "bonafide" and row["predicted_label"] == "spoof"],
+        "false_negatives": [row["sample_id"] for row in rows if row["ground_truth"] == "spoof" and row["predicted_label"] == "bonafide"],
+        "sample_predictions": rows,
+        "validation_warnings": [issue for issue in validation["issues"] if issue["severity"] == "warning"],
+        "performance_statement": REAL_WORLD_LIMITATION,
     }
+    if sweep:
+        report["threshold_sweep"] = threshold_sweep(rows, thresholds or DEFAULT_THRESHOLDS)
+        report["threshold_sweep_note"] = "Exploratory validation-partition analysis only; no production threshold is selected or changed."
+    if output_dir is not None:
+        write_evaluation_report(rows, report, output_dir)
+        print(f"Wrote {output_dir / 'per_sample_predictions.csv'}")
+        print(f"Wrote {output_dir / 'evaluation_summary.json'}")
+    print(json.dumps({"partition": report["partition"], "metrics": metrics, "false_positives": report["false_positives"], "false_negatives": report["false_negatives"], "performance_statement": REAL_WORLD_LIMITATION}, indent=2, allow_nan=False))
+    return report
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--manifest", type=Path, default=ROOT / "tests/audio/evaluation_manifest.json")
+    parser.add_argument("--dataset-root", type=Path, default=ROOT / "tests/audio")
+    parser.add_argument("--partition", choices=("development", "validation", "test"))
+    parser.add_argument("--threshold-sweep", action="store_true", help="Explore thresholds; requires --partition validation.")
+    parser.add_argument("--thresholds", help="Optional comma-separated sweep thresholds in [0,1]; default is 0.00 through 1.00 by 0.05.")
+    parser.add_argument("--output-dir", type=Path, help="Optional destination for per-sample CSV and JSON summary.")
+    parser.add_argument("--detectors", help="Run registered offline adapters instead of the legacy single-model evaluator; comma-separated IDs, e.g. current,sara1708_wav2vec2,aasist_l.")
+    args = parser.parse_args()
+    try:
+        if args.detectors:
+            if args.threshold_sweep:
+                raise ValueError("--threshold-sweep belongs to the legacy evaluator; registered comparison currently reports adapter-declared decisions only.")
+            from compare_detectors import compare_detectors
+            comparison = compare_detectors(
+                args.manifest,
+                args.dataset_root,
+                [value.strip() for value in args.detectors.split(",") if value.strip()],
+                args.partition,
+            )
+            output = (args.output_dir / "model_comparison.json") if args.output_dir else Path("/tmp/echosentinel-model-comparison.json")
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_text(json.dumps(comparison, indent=2, sort_keys=True, allow_nan=False) + "\n", encoding="utf-8")
+            print(json.dumps({"output": str(output), "models": {key: {"status": value["availability_status"], "coverage": value["coverage"], "metrics": value["metrics"]} for key, value in comparison["models"].items()}, "paired_comparison": comparison["paired_comparison"]}, indent=2, allow_nan=False))
+            return 0
+        thresholds = [float(value) for value in args.thresholds.split(",")] if args.thresholds else None
+        evaluate(args.manifest, args.dataset_root, args.partition, args.output_dir, args.threshold_sweep, thresholds)
+    except Exception as exc:
+        parser.exit(2, f"Evaluation failed: {type(exc).__name__}: {exc}\n")
+    return 0
 
 
 if __name__ == "__main__":
-    evaluate()
+    sys.exit(main())

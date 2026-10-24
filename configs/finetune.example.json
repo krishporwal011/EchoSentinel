@@ -1,0 +1,83 @@
+{
+  "experiment_name": "echosentinel-audio-detector-exploratory",
+  "purpose": "offline research experiment only; never loaded by the production API",
+  "model": {
+    "model_id": "HyperMoon/wav2vec2-base-960h-finetuned-deepfake",
+    "revision": "c73de548282dd35b6dec0844b924e3a931f3abfc",
+    "local_files_only": true,
+    "architecture": "Wav2Vec2ForSequenceClassification",
+    "expected_labels": {
+      "bonafide": 0,
+      "spoof": 1
+    }
+  },
+  "data": {
+    "manifest": "/path/to/training_manifest.json",
+    "dataset_root": "/path/to/dataset",
+    "train_partition": "development",
+    "validation_partition": "validation",
+    "final_test_partition": "test",
+    "group_fields": ["speaker_id", "source_recording_id", "synthetic_generator"],
+    "require_group_disjointness": true,
+    "minimum_samples_for_exploratory_run": 100,
+    "sample_count_warning": "100 samples is exploratory only and cannot establish real-world accuracy",
+    "dataset_license_reviewed": false,
+    "consent_and_provenance_reviewed": false
+  },
+  "audio": {
+    "sample_rate_hz": 16000,
+    "channels": 1,
+    "production_preprocessing": "backend/audio_processor.py: decode, mono mix, resample to 16 kHz, validate duration/level, peak normalize to 0.95; then checkpoint feature extractor normalization",
+    "maximum_duration_seconds": 60,
+    "maximum_file_size_bytes": 26214400
+  },
+  "optimization": {
+    "loss": "cross_entropy",
+    "optimizer": "AdamW",
+    "learning_rate": 0.00001,
+    "weight_decay": 0.01,
+    "epochs": 3,
+    "per_device_batch_size": 2,
+    "gradient_accumulation_steps": 8,
+    "gradient_checkpointing": true,
+    "freeze_feature_encoder": false,
+    "early_stopping_metric": "validation_macro_f1",
+    "early_stopping_patience": 2
+  },
+  "reproducibility": {
+    "seed": 20261023,
+    "deterministic_algorithms": true,
+    "device": "cpu",
+    "offline_only": true,
+    "record_python_torch_transformers_numpy_versions": true,
+    "record_preprocessing_and_manifest_sha256": true
+  },
+  "artifacts": {
+    "output_dir": "/path/to/separate-experiment-checkpoints/echosentinel-audio-detector-exploratory",
+    "never_overwrite_production_checkpoint": true,
+    "save_best_validation_checkpoint": true,
+    "save_final_checkpoint": true,
+    "save_training_log_and_per_sample_predictions": true
+  },
+  "evaluation": {
+    "primary_threshold": 0.5,
+    "threshold_selection_partition": "validation",
+    "final_test_used_for_threshold_selection": false,
+    "report": [
+      "class_counts",
+      "inference_coverage_and_failures",
+      "confusion_matrix",
+      "accuracy",
+      "precision",
+      "recall",
+      "macro_f1",
+      "false_positive_rate",
+      "false_negative_rate",
+      "roc_auc_when_defined",
+      "per_condition_errors",
+      "inference_latency",
+      "checkpoint_hash",
+      "limitations_and_possible_leakage"
+    ]
+  }
+}

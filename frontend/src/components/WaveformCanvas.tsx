@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useRef } from "react";
+import React, { useCallback, useEffect, useRef } from "react";
 
 interface WaveformCanvasProps {
   isRecording: boolean;
@@ -20,7 +20,7 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
   const idlePhaseRef = useRef<number>(0);
 
   // Clean, professional stroke color
-  const getStrokeColor = () => {
+  const getStrokeColor = useCallback(() => {
     if (!isRecording) return "#64748b"; // slate-500
     switch (riskLevel) {
       case "Critical":
@@ -33,7 +33,7 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
       default:
         return "#10b981"; // emerald-500
     }
-  };
+  }, [isRecording, riskLevel]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -41,7 +41,7 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    let dpr = window.devicePixelRatio || 1;
+    const dpr = window.devicePixelRatio || 1;
     const resizeCanvas = () => {
       const rect = canvas.getBoundingClientRect();
       canvas.width = rect.width * dpr;
@@ -126,7 +126,7 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
       if (animationRef.current) cancelAnimationFrame(animationRef.current);
       window.removeEventListener("resize", resizeCanvas);
     };
-  }, [isRecording, waveformData, riskLevel]);
+  }, [isRecording, waveformData, riskLevel, getStrokeColor]);
 
   return (
     <div className="relative w-full h-28 sm:h-36 rounded-lg overflow-hidden bg-slate-950 border border-slate-800">
@@ -142,19 +142,19 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
             isRecording ? "bg-red-500 animate-pulse" : "bg-slate-600"
           }`}
         />
-        <span className="text-xs font-mono text-slate-400">
+        <span className="text-sm font-mono text-slate-400">
           {isRecording ? "Live Audio Stream • 16 kHz Mono" : "Sensor Inactive"}
         </span>
       </div>
 
       {isAnalyzing && (
-        <div className="absolute top-2.5 right-3 flex items-center gap-1.5 bg-slate-900 px-2 py-0.5 rounded border border-slate-700 text-slate-300 text-xs font-mono">
+        <div className="absolute top-2.5 right-3 flex items-center gap-1.5 bg-slate-900 px-2 py-0.5 rounded border border-slate-700 text-slate-300 text-sm font-mono">
           <span>Processing chunk...</span>
         </div>
       )}
 
       <div className="absolute bottom-2 right-3 pointer-events-none">
-        <span className="text-[11px] font-mono text-slate-500">
+        <span className="text-[13px] font-mono text-slate-500">
           PCM Float32 • 512 FFT
         </span>
       </div>

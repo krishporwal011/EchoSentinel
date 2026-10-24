@@ -47,13 +47,11 @@ def test_genuine_with_background_noise():
     assert quality["warning_message"] is not None
     assert "background noise" in quality["warning_message"].lower()
 
-    # Crucial test: When model outputs "AI-generated" on noisy audio,
-    # the application does NOT blindly classify it as authentic,
-    # nor does it claim high confidence. It returns "Possible spoof" with low reliability.
+    # A noisy model output is withheld as inconclusive with a quality warning.
     decision = determine_application_decision("AI-generated", 0.9999, quality)
-    assert decision["final_decision"] == "Possible spoof"
+    assert decision["final_decision"] == "inconclusive"
     assert decision["detection_reliability"] == "LOW"
-    assert "low due to degraded audio" in decision["reliability_label"].lower()
+    assert "low due to heuristic recording-quality checks" in decision["reliability_label"].lower()
     assert decision["quality_warning"] is not None
 
 
@@ -68,9 +66,9 @@ def test_genuine_with_reverberation():
     assert "reverberation" in quality["warning_message"].lower()
 
     decision = determine_application_decision("AI-generated", 0.9999, quality)
-    assert decision["final_decision"] == "Possible spoof"
+    assert decision["final_decision"] == "inconclusive"
     assert decision["detection_reliability"] == "LOW"
-    assert "low due to degraded audio" in decision["reliability_label"].lower()
+    assert "low due to heuristic recording-quality checks" in decision["reliability_label"].lower()
 
 
 def test_telephone_band_speech():
@@ -84,7 +82,7 @@ def test_telephone_band_speech():
     assert "telephone" in quality["warning_message"].lower()
 
     decision = determine_application_decision("AI-generated", 0.9926, quality)
-    assert decision["final_decision"] == "Possible spoof"
+    assert decision["final_decision"] == "inconclusive"
     assert decision["detection_reliability"] == "LOW"
 
 
@@ -99,7 +97,7 @@ def test_clean_ai_speech():
     assert len(quality["flags"]) == 0
 
     decision = determine_application_decision("AI-generated", 0.9998, quality)
-    assert decision["final_decision"] == "AI-generated"
+    assert decision["final_decision"] == "ai_generated"
     assert decision["detection_reliability"] == "HIGH"
     assert decision["quality_warning"] is None
 
@@ -113,10 +111,9 @@ def test_ai_speech_with_noise():
     assert "high_background_noise" in quality["flags"]
     assert quality["reliability"] == "LOW"
 
-    # Must NOT become authentic
+    # Poor-quality audio is inconclusive rather than being presented as either class.
     decision = determine_application_decision("AI-generated", 0.9999, quality)
-    assert decision["final_decision"] != "authentic"
-    assert decision["final_decision"] == "Possible spoof"
+    assert decision["final_decision"] == "inconclusive"
     assert decision["detection_reliability"] == "LOW"
 
 
@@ -129,11 +126,24 @@ def test_ai_speech_with_reverberation():
     assert "reverberation_detected" in quality["flags"]
     assert quality["reliability"] == "LOW"
 
-    # Must NOT become authentic
+    # Poor-quality audio is inconclusive rather than being presented as either class.
     decision = determine_application_decision("AI-generated", 0.9999, quality)
-    assert decision["final_decision"] != "authentic"
-    assert decision["final_decision"] == "Possible spoof"
+    assert decision["final_decision"] == "inconclusive"
     assert decision["detection_reliability"] == "LOW"
+
+
+def test_low_quality_human_prediction_is_not_labeled_authentic():
+    quality = {"reliability": "LOW", "flags": ["high_background_noise"], "warning_message": "Noise warning"}
+    decision = determine_application_decision("Authentic", 0.01, quality)
+    assert decision["final_decision"] == "inconclusive"
+    assert decision["status"] == "needs_better_recording"
+    assert decision["quality_warning"] == "Noise warning"
+
+
+def test_medium_quality_normalizes_case_and_label_values():
+    quality = {"reliability": "MEDIUM", "flags": [], "warning_message": None}
+    assert determine_application_decision("Authentic", 0.01, quality)["final_decision"] == "authentic"
+    assert determine_application_decision("AI-generated", 0.99, quality)["final_decision"] == "ai_generated"
 
 
 def test_empty_audio_quality_handling():

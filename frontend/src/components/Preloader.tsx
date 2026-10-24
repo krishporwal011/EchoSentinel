@@ -69,7 +69,7 @@ export const Preloader: React.FC<PreloaderProps> = ({ onComplete }) => {
 
             {/* Subtitle */}
             <motion.p
-              className="text-[10px] font-mono tracking-[0.2em] text-[#9ba2b1] mt-1.5 uppercase"
+              className="text-[12px] font-mono tracking-[0.2em] text-[#9ba2b1] mt-1.5 uppercase"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ delay: 0.2, duration: 0.4 }}
@@ -86,7 +86,7 @@ export const Preloader: React.FC<PreloaderProps> = ({ onComplete }) => {
                 />
               </div>
 
-              <div className="mt-2.5 flex justify-between items-center text-[10px] font-mono text-[#626978]">
+              <div className="mt-2.5 flex justify-between items-center text-[12px] font-mono text-[#8b93a3]">
                 <span>INITIALIZING SENSORS</span>
                 <span className="text-[#9ba2b1] font-semibold">{progress}%</span>
               </div>

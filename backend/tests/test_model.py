@@ -1,7 +1,7 @@
 import pytest
 import numpy as np
 from unittest.mock import MagicMock
-from model import VoiceCloneDetector, calculate_risk_level
+from model import VoiceCloneDetector, calculate_risk_level, resolve_label_mapping
 
 def test_risk_level_thresholds():
     assert calculate_risk_level(0) == 'Low'
@@ -18,43 +18,18 @@ def test_risk_level_thresholds():
     assert calculate_risk_level(100) == 'Critical'
 
 def test_label_mapping_resolution_standard():
-    detector = VoiceCloneDetector(model_id='mock')
-    mock_model = MagicMock()
-    mock_model.config.id2label = {'0': 'bonafide', '1': 'spoof'}
-    detector.model = mock_model
-    detector.feature_extractor = MagicMock()
-
-    raw_id2label = {int(k): str(v).strip().lower() for k, v in mock_model.config.id2label.items()}
-    bonafide_candidates = [k for k, v in raw_id2label.items() if 'bonafide' in v]
-    spoof_candidates = [k for k, v in raw_id2label.items() if 'spoof' in v]
-
-    assert bonafide_candidates == [0]
-    assert spoof_candidates == [1]
+    assert resolve_label_mapping({'0': 'bonafide', '1': 'spoof'}) == {'bonafide': 0, 'spoof': 1}
 
 def test_label_mapping_resolution_inverted():
-    mock_model = MagicMock()
-    mock_model.config.id2label = {'0': 'spoof', '1': 'bonafide'}
-    raw_id2label = {int(k): str(v).strip().lower() for k, v in mock_model.config.id2label.items()}
-    bonafide_candidates = [k for k, v in raw_id2label.items() if any(t in v for t in ['bonafide', 'real', 'authentic'])]
-    spoof_candidates = [k for k, v in raw_id2label.items() if any(t in v for t in ['spoof', 'fake', 'clone'])]
-
-    assert bonafide_candidates == [1]
-    assert spoof_candidates == [0]
+    assert resolve_label_mapping({'0': 'spoof', '1': 'bonafide'}) == {'bonafide': 1, 'spoof': 0}
 
 def test_label_mapping_fails_on_unknown():
-    detector = VoiceCloneDetector(model_id='mock')
-    mock_model = MagicMock()
-    mock_model.config.id2label = {'0': 'class_a', '1': 'class_b'}
-    detector.model = mock_model
-    detector.feature_extractor = MagicMock()
-    
-    with pytest.raises(RuntimeError) as exc_info:
-        raw_id2label = {int(k): str(v).strip().lower() for k, v in mock_model.config.id2label.items()}
-        bonafide_candidates = [k for k, v in raw_id2label.items() if any(t in v for t in ['bonafide', 'real', 'authentic'])]
-        spoof_candidates = [k for k, v in raw_id2label.items() if any(t in v for t in ['spoof', 'fake', 'clone'])]
-        if len(bonafide_candidates) != 1 or len(spoof_candidates) != 1:
-            raise RuntimeError('Cannot safely determine label mapping')
-    assert 'Cannot safely determine label mapping' in str(exc_info.value)
+    with pytest.raises(RuntimeError, match='Cannot safely determine label mapping'):
+        resolve_label_mapping({'0': 'class_a', '1': 'class_b'})
+
+def test_label_mapping_rejects_more_than_two_classes():
+    with pytest.raises(RuntimeError, match='exactly two'):
+        resolve_label_mapping({'0': 'bonafide', '1': 'spoof', '2': 'noise'})
 
 def test_real_model_label_mapping():
     detector = VoiceCloneDetector.get_instance()

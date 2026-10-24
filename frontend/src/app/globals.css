@@ -9,7 +9,7 @@
 
     --text-primary: #f4f5f7;
     --text-secondary: #9ba2b1;
-    --text-muted: #626978;
+    --text-muted: #8b93a3;
 
     --accent-blue: #66b7ff;
     --accent-cyan: #8ddcff;
@@ -43,8 +43,9 @@
 }
 
 .font-serif-cinematic {
-  font-family: var(--font-serif), "Cormorant Garamond", "Playfair Display", Georgia, serif;
-  letter-spacing: -0.02em;
+  font-family: var(--font-sans), Inter, -apple-system, BlinkMacSystemFont, sans-serif;
+  letter-spacing: -0.035em;
+  font-weight: 600;
 }
 
 .font-sans-ui {

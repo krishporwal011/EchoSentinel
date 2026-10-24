@@ -40,3 +40,10 @@ backend/models/*
 !backend/models/.gitkeep
 backend/.cache/
 ~/.cache/huggingface/
+
+# Large Datasets and Archives
+backend/audios-for-test/
+*.zip
+*.tar.gz
+*.gz
+*.tar

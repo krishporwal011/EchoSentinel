@@ -13,6 +13,31 @@ import librosa
 logger = logging.getLogger("echosentinel.audio_quality")
 
 
+def build_audio_visuals(waveform: np.ndarray, sample_rate: int = 16000) -> Dict[str, Any]:
+    """Return bounded waveform/spectrogram data for display, never as proof of spoofing."""
+    mono = np.asarray(waveform, dtype=np.float32).reshape(-1)
+    if mono.size == 0:
+        return {"waveform": [], "spectrogram": []}
+
+    waveform_bins = min(512, mono.size)
+    waveform_points = []
+    for block in np.array_split(mono, waveform_bins):
+        waveform_points.append(round(float(np.mean(block)), 5))
+
+    stft = np.abs(librosa.stft(mono, n_fft=512, hop_length=256))
+    db = librosa.amplitude_to_db(stft + 1e-8, ref=np.max)
+    db = np.clip((db + 60.0) / 60.0, 0.0, 1.0)
+    row_indices = np.linspace(0, db.shape[0] - 1, 48).astype(int)
+    col_indices = np.linspace(0, db.shape[1] - 1, 96).astype(int)
+    spectrogram = np.round(db[np.ix_(row_indices, col_indices)], 3).tolist()
+    return {
+        "waveform": waveform_points,
+        "spectrogram": spectrogram,
+        "spectrogram_sample_rate": sample_rate,
+        "spectrogram_hop_length": 256,
+    }
+
+
 def analyze_audio_quality(
     waveform: np.ndarray,
     sample_rate: int = 16000,
@@ -72,7 +97,7 @@ def analyze_audio_quality(
     p10 = float(np.percentile(frame_rms, 10))
     p05 = float(np.percentile(frame_rms, 5))
     dyn_range = float(20.0 * np.log10(max(p95, 1e-6) / max(p05, 1e-6)))
-    snr_est = float(20.0 * np.log10(max(p95, 1e-6) / max(p10, 1e-6)))
+    level_variation_db = float(20.0 * np.log10(max(p95, 1e-6) / max(p10, 1e-6)))
 
     # 3. Spectral analysis & Telephony/Narrowband check
     stft = np.abs(librosa.stft(waveform))
@@ -84,7 +109,9 @@ def analyze_audio_quality(
     energy_mid = float(np.sum(stft[mid_band, :] ** 2)) + 1e-9
     high_mid_db = float(10.0 * np.log10(max(energy_above_4k, 1e-12) / energy_mid))
 
-    is_narrowband = (native_sample_rate is not None and native_sample_rate <= 8000) or (high_mid_db < -35.0)
+    is_narrowband = native_sample_rate is not None and native_sample_rate <= 8000
+    total_spectral_energy = float(np.sum(stft ** 2)) + 1e-12
+    high_frequency_share = float(energy_above_4k / total_spectral_energy)
 
     # 4. Background noise flatness in quiet frames
     flatness = librosa.feature.spectral_flatness(y=waveform)
@@ -94,7 +121,8 @@ def analyze_audio_quality(
     else:
         noise_flatness = float(np.mean(flatness))
 
-    is_noisy = (dyn_range < 24.0 and noise_flatness > 0.05) or (snr_est < 16.0)
+    # These are recording-quality heuristics, not validated speech/noise separation.
+    is_noisy = (dyn_range < 24.0 and noise_flatness > 0.05) or (level_variation_db < 16.0)
 
     # 5. Room reverberation: energy envelope autocorrelation tail at 50ms - 200ms
     rms_centered = frame_rms - np.mean(frame_rms)
@@ -167,13 +195,53 @@ def analyze_audio_quality(
 
     warning_message = " ".join(warnings) if warnings else None
 
+    peak_dbfs = float(20.0 * np.log10(max(float(np.max(np.abs(waveform))), 1e-6)))
+    measurements = [
+        {
+            "id": "source_sample_rate",
+            "label": "Source sample rate",
+            "value": int(native_sample_rate) if native_sample_rate is not None else sample_rate,
+            "unit": "Hz",
+            "interpretation": "The model input is resampled to 16 kHz; resampling cannot restore frequencies absent from the source.",
+        },
+        {
+            "id": "clipped_samples",
+            "label": "Samples at digital peak",
+            "value": round(clip_ratio * 100.0, 4),
+            "unit": "%",
+            "interpretation": "A non-zero value means some samples reached the clipping range. This is a recording-quality observation, not evidence of AI generation.",
+        },
+        {
+            "id": "peak_level",
+            "label": "Peak level",
+            "value": round(peak_dbfs, 1),
+            "unit": "dBFS",
+            "interpretation": "Measured peak amplitude relative to digital full scale.",
+        },
+        {
+            "id": "level_variation",
+            "label": "Frame-level variation",
+            "value": round(level_variation_db, 1),
+            "unit": "dB",
+            "interpretation": "A rough variation between quiet and loud frames; this is not a measured signal-to-noise ratio.",
+        },
+        {
+            "id": "high_frequency_share",
+            "label": "Energy above 3.8 kHz",
+            "value": round(high_frequency_share * 100.0, 2),
+            "unit": "%",
+            "interpretation": "A descriptive spectral measurement. No universal range proves speech is synthetic.",
+        },
+    ]
+
     return {
         "quality_score": score,
         "quality_rating": quality_rating,
         "reliability": reliability,
         "flags": flags,
         "warning_message": warning_message,
-        "snr_db": round(snr_est, 1),
+        "snr_db": None,
+        "level_variation_db": round(level_variation_db, 1),
         "dynamic_range_db": round(dyn_range, 1),
         "env_tail": round(env_tail, 3),
         "high_mid_db": round(high_mid_db, 1),
@@ -181,7 +249,9 @@ def analyze_audio_quality(
         "is_clipped": is_clipped,
         "is_narrowband": is_narrowband,
         "is_noisy": is_noisy,
-        "is_reverberant": is_reverberant
+        "is_reverberant": is_reverberant,
+        "measurements": measurements,
+        **build_audio_visuals(waveform, sample_rate),
     }
 
 
@@ -190,47 +260,38 @@ def determine_application_decision(
     raw_spoof_score: float,
     audio_quality: Dict[str, Any]
 ) -> Dict[str, Any]:
-    """
-    Combines raw model prediction with acoustic quality analysis to produce an honest,
-    calibrated application decision without overriding the model blindly.
+    """Return a normalized decision, withholding a class when quality is unreliable.
+
+    Reliability is a heuristic recording-quality tier, not model confidence. The live
+    API currently returns the model class and quality indicators separately.
     """
     reliability = audio_quality.get("reliability", "HIGH")
-    flags = audio_quality.get("flags", [])
     warning = audio_quality.get("warning_message")
+    normalized_prediction = str(raw_model_prediction).strip().lower().replace("_", " ").replace("-", " ")
+    if normalized_prediction in {"authentic", "bonafide", "bona fide", "human", "likely human recorded"}:
+        model_decision = "authentic"
+    elif normalized_prediction in {"ai generated", "spoof", "synthetic", "likely ai generated"}:
+        model_decision = "ai_generated"
+    else:
+        model_decision = "inconclusive"
 
     if reliability == "LOW":
-        if raw_model_prediction == "AI-generated":
-            final_decision = "Possible spoof"
-            reliability_label = "Low due to degraded audio"
-            reason = warning or "Background noise / reverberation / narrowband recording may affect detection."
-            status = "needs_better_recording"
-        else:
-            final_decision = "Authentic"
-            reliability_label = "Low due to degraded audio"
-            reason = warning or "Degraded audio quality may obscure voice cloning artifacts."
-            status = "needs_better_recording"
-    elif reliability == "MEDIUM":
-        if raw_model_prediction == "AI-generated":
-            final_decision = "AI-generated"
-            reliability_label = "Moderate (some acoustic coloration)"
-            reason = warning
-            status = "analyzed"
-        else:
-            final_decision = "authentic"
-            reliability_label = "Moderate (some acoustic coloration)"
-            reason = warning
-            status = "analyzed"
+        final_decision = "inconclusive"
+        reliability_label = "Low due to heuristic recording-quality checks"
+        status = "needs_better_recording"
     else:
-        final_decision = raw_model_prediction
-        reliability_label = "High"
-        reason = None
+        final_decision = model_decision
+        reliability_label = "Moderate" if reliability == "MEDIUM" else "High"
         status = "analyzed"
+
+    # `raw_spoof_score` is retained for backward compatibility; it is not calibrated.
+    _ = raw_spoof_score
 
     return {
         "final_decision": final_decision,
         "detection_reliability": reliability,
         "reliability_label": reliability_label,
-        "quality_warning": reason,
+        "quality_warning": warning,
         "status": status
     }
 

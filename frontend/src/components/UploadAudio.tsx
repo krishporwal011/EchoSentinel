@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useRef } from "react";
-import { Upload, FileAudio } from "lucide-react";
+import { Upload } from "lucide-react";
 
 interface UploadAudioProps {
   onFileSelected: (file: File) => void;
@@ -36,7 +36,7 @@ export const UploadAudio: React.FC<UploadAudioProps> = ({
         type="button"
         disabled={disabled}
         onClick={() => inputRef.current?.click()}
-        className="px-6 py-3.5 rounded-full border border-[rgba(255,255,255,0.18)] bg-[#111520] hover:bg-[#181c27] hover:border-[#66b7ff]/50 text-[#f4f5f7] font-mono text-xs tracking-wider transition-all flex items-center gap-2.5 shadow-md disabled:opacity-50"
+        className="px-6 py-3.5 rounded-full border border-[rgba(255,255,255,0.18)] bg-[#111520] hover:bg-[#181c27] hover:border-[#66b7ff]/50 text-[#f4f5f7] font-mono text-sm tracking-wider transition-all flex items-center gap-2.5 shadow-md disabled:opacity-50"
       >
         <Upload size={14} className="text-[#66b7ff]" />
         <span>UPLOAD AUDIO</span>

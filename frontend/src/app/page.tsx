@@ -1,222 +1,168 @@
 "use client";
 
-import React, { useState, useRef, useCallback, useEffect } from "react";
+import React, { useState, useRef, useCallback, useEffect, useReducer } from "react";
 import { motion } from "framer-motion";
-import { Mic, MicOff, Lock, Unlock, CheckCircle2, ChevronDown, ArrowRight } from "lucide-react";
+import { Mic, MicOff, Flame, Sparkles } from "lucide-react";
 import { Preloader } from "../components/Preloader";
-import { SoundGate } from "../components/SoundGate";
 import { AudioLandscape } from "../components/AudioLandscape";
 import { AudioWaveform } from "../components/AudioWaveform";
 import { AnalysisPipeline } from "../components/AnalysisPipeline";
 import { DetectionResult } from "../components/DetectionResult";
-import { RiskIndicator } from "../components/RiskIndicator";
 import { WarningPanel } from "../components/WarningPanel";
-import { IdentityVerification } from "../components/IdentityVerification";
+import { RiskMeter } from "../components/RiskMeter";
+import { ScamIntentAnalysis } from "../components/ScamIntentAnalysis";
 import { DemoMode } from "../components/DemoMode";
 import { UploadAudio } from "../components/UploadAudio";
 import { PageTransition } from "../components/PageTransition";
 import { AudioStreamRecorder } from "../lib/audioRecorder";
+import { createDemoResult, type DetectionResponse } from "../lib/detection";
+import { detectionReducer, initialDetectionState } from "../lib/detectionState";
 import { WORKFLOW_STEPS, HONEST_LIMITATIONS } from "../lib/content";
+import { triggerUpcomingFeatureModal } from "../components/UpcomingFeatureModal";
 
-interface DetectionResponse {
-  prediction: "authentic" | "AI-generated" | "Possible spoof" | string;
-  raw_model_prediction?: string;
-  confidence: number;
-  model_spoof_score?: number;
-  risk_score: number;
-  risk_level: "Low" | "Suspicious" | "High" | "Critical";
-  audio_quality_score?: number;
-  audio_quality_rating?: string;
-  detection_reliability?: "HIGH" | "MEDIUM" | "LOW";
-  reliability_label?: string;
-  quality_flags?: string[];
-  quality_warning?: string;
-  processing_time_ms?: number;
-  model_source?: string;
-  status?: string;
-}
+const riskOf = (result: DetectionResponse | null): "Low" | "Suspicious" | "High" | "Critical" => {
+  if (!result) return "Low";
+  if (result.prediction.label === "likely_ai_generated") {
+    const aiProb = result.prediction.ai_probability ?? 0;
+    return aiProb >= 0.85 ? "Critical" : "High";
+  }
+  const level = result.prediction.risk_level;
+  return level === "high" ? "High" : level === "medium" || level === "inconclusive" ? "Suspicious" : "Low";
+};
 
 export default function Home() {
   // Intro & Boot Stages
   const [showPreloader, setShowPreloader] = useState(true);
-  const [showSoundGate, setShowSoundGate] = useState(true);
-  const [soundEnabled, setSoundEnabled] = useState(true);
 
   // Live Audio Detection State
   const [isRecording, setIsRecording] = useState(false);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isStarting, setIsStarting] = useState(false);
+  const [detectionState, dispatch] = useReducer(detectionReducer, initialDetectionState);
+  const { result, errorMessage, isAnalyzing } = detectionState;
   const [audioLevel, setAudioLevel] = useState(0);
   const [waveformData, setWaveformData] = useState<Uint8Array | null>(null);
   const [chunkCounter, setChunkCounter] = useState(1);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-
-  // Results State - starts as null until actual inference completes
-  const [result, setResult] = useState<DetectionResponse | null>(null);
-
-  // Verification & Threat Mitigation State
-  const [isVerificationOpen, setIsVerificationOpen] = useState(false);
-  const [isBlocked, setIsBlocked] = useState(false);
-  const [isVerified, setIsVerified] = useState(false);
-
   // Demo Simulation State
   const [isDemoMode, setIsDemoMode] = useState(false);
-  const [isDemoSimulated, setIsDemoSimulated] = useState(false);
 
   // References
   const recorderRef = useRef<AudioStreamRecorder | null>(null);
+  const startAttemptRef = useRef(0);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
-  const latestSeqRef = useRef<number>(0);
-  const activeRequestsRef = useRef<number>(0);
-  const recentScoresRef = useRef<number[]>([]);
+  const requestSeqRef = useRef<number>(0);
 
   const rawApiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
   const API_URL = rawApiUrl.replace(/\/+$/, "");
 
-  // Handle incoming detection result with sequence-number protection and temporal smoothing
+  useEffect(() => () => {
+    startAttemptRef.current += 1;
+    recorderRef.current?.stop();
+    recorderRef.current = null;
+    if (timerRef.current) clearInterval(timerRef.current);
+  }, []);
+
+  // Keep the model output intact; smoothing probabilities would misrepresent inference.
   const handleDetectionData = useCallback(
     (data: DetectionResponse, seqId?: number, isLiveChunk: boolean = false) => {
-      // Sequence protection: discard older out-of-order responses
-      if (seqId && seqId < latestSeqRef.current) {
-        return;
-      }
-      if (seqId) latestSeqRef.current = seqId;
+      if (seqId === undefined) return;
+      void isLiveChunk;
+      dispatch({ type: "request_succeeded", requestId: seqId, result: data });
 
-      let finalData = data;
-
-      // Temporal smoothing over recent live chunks (sliding window of up to 3 chunks)
-      if (isLiveChunk) {
-        recentScoresRef.current.push(data.risk_score);
-        if (recentScoresRef.current.length > 3) {
-          recentScoresRef.current.shift();
-        }
-
-        // Apply smoothing to prevent jumping, but do NOT suppress genuine Critical spikes (>=81)
-        if (data.risk_score < 80 && recentScoresRef.current.length >= 2) {
-          const weights =
-            recentScoresRef.current.length === 2 ? [0.4, 0.6] : [0.2, 0.3, 0.5];
-          const smoothedScore = Math.round(
-            recentScoresRef.current.reduce((acc, score, idx) => acc + score * weights[idx], 0)
-          );
-          const smoothedLevel: "Low" | "Suspicious" | "High" | "Critical" =
-            smoothedScore <= 30
-              ? "Low"
-              : smoothedScore <= 60
-              ? "Suspicious"
-              : smoothedScore <= 80
-              ? "High"
-              : "Critical";
-
-          finalData = {
-            ...data,
-            risk_score: smoothedScore,
-            risk_level: smoothedLevel,
-          };
-        }
-      } else {
-        recentScoresRef.current = [data.risk_score];
-      }
-
-      setResult(finalData);
-      setErrorMessage(null);
-
-      if (finalData.risk_level === "High" || finalData.risk_level === "Critical") {
-        setIsBlocked(true);
-        setIsVerified(false);
-        setIsVerificationOpen(true);
-      }
     },
     []
   );
 
+  const sessionIdRef = useRef<string>(`session_${Date.now()}`);
+
   // Send an audio chunk to backend /detect with concurrency tracking
   const sendChunk = useCallback(
-    async (blob: Blob, seqId: number, simulateType?: "genuine" | "clone") => {
-      activeRequestsRef.current += 1;
-      setIsAnalyzing(true);
+    async (blob: Blob, seqId: number) => {
+      const requestId = ++requestSeqRef.current;
+      dispatch({ type: "request_started", requestId });
       setChunkCounter(seqId);
 
       try {
         const formData = new FormData();
         formData.append("file", blob, `stream_${seqId}.wav`);
+        formData.append("session_id", sessionIdRef.current);
+        formData.append("sequence_id", String(seqId));
 
-        let url = `${API_URL}/detect`;
-        if (simulateType) url += `?simulate=${simulateType}`;
-
-        const resp = await fetch(url, { method: "POST", body: formData });
+        const resp = await fetch(`${API_URL}/detect`, { method: "POST", body: formData });
         if (!resp.ok) {
           const errorBody = await resp.json().catch(() => null);
-          const detail = errorBody?.detail || `HTTP ${resp.status}`;
+          const detail = errorBody?.error?.message || errorBody?.detail || `HTTP ${resp.status}`;
           throw new Error(detail);
         }
 
-        const data: DetectionResponse = await resp.json();
-        handleDetectionData(data, seqId, true);
-      } catch (err: any) {
-        console.warn("Stream analysis notice:", err);
+        const data: DetectionResponse = { ...(await resp.json()), mode: "real" };
+        handleDetectionData(data, requestId, true);
+      } catch (err: unknown) {
+        const error = err instanceof Error ? err : new Error(String(err));
+        console.warn("Stream analysis notice:", error);
+        dispatch({ type: "request_failed", requestId, message: error.message || "Live audio analysis failed." });
       } finally {
-        activeRequestsRef.current = Math.max(0, activeRequestsRef.current - 1);
-        if (activeRequestsRef.current === 0) {
-          setIsAnalyzing(false);
-        }
+        // Reducer request IDs prevent older chunk completions from changing current state.
       }
     },
     [API_URL, handleDetectionData]
   );
 
-  // Start Live Detection
+  // Start Live Detection via Web Audio API Chunker
   const handleStartDetection = async () => {
-    setIsDemoSimulated(false);
+    if (isRecording || isStarting) return;
+    setIsStarting(true);
     setRecordingSeconds(0);
-    setErrorMessage(null);
-    recentScoresRef.current = [];
+    sessionIdRef.current = `session_${Date.now()}`;
 
     try {
-      const recorder = new AudioStreamRecorder({
-        chunkIntervalMs: 2800,
-        onChunk: (chunkBlob, seqId) => {
-          sendChunk(chunkBlob, seqId);
+      recorderRef.current = new AudioStreamRecorder({
+        chunkIntervalMs: 2500,
+        onChunk: (blob: Blob, seqId: number) => {
+          sendChunk(blob, seqId);
         },
-        onWaveformData: (data) => {
+        onWaveformData: (data: Uint8Array) => {
           setWaveformData(data);
           let sum = 0;
           for (let i = 0; i < data.length; i++) {
             sum += Math.abs(data[i] - 128);
           }
-          const avg = sum / data.length;
-          setAudioLevel(Math.min(1, avg / 45));
+          setAudioLevel(Math.min(100, Math.round((sum / data.length) * 2)));
         },
-        onError: (err) => {
-          console.error("Mic error:", err);
-          setErrorMessage(
-            err.message?.includes("Permission") || err.message?.includes("NotAllowedError")
-              ? "Microphone access was denied. Please allow microphone permission in your browser."
-              : `Microphone error: ${err.message || "Device unavailable."}`
-          );
+        onError: (err: Error) => {
+          console.error("Audio recording error:", err);
           handleStopDetection();
+          dispatch({
+            type: "request_failed",
+            requestId: ++requestSeqRef.current,
+            message: `Microphone error: ${err.message}`,
+          });
         },
       });
 
-      recorderRef.current = recorder;
-      await recorder.start();
+      await recorderRef.current.start();
       setIsRecording(true);
+      setIsStarting(false);
 
       timerRef.current = setInterval(() => {
         setRecordingSeconds((prev) => prev + 1);
       }, 1000);
-    } catch (err: any) {
-      console.error("Failed to start detection:", err);
-      setErrorMessage(
-        err.message?.includes("Permission") || err.name === "NotAllowedError"
-          ? "Microphone access was denied. Please allow microphone permission in your browser settings."
-          : `Failed to initialize microphone: ${err.message || "Device unavailable"}`
-      );
+    } catch (err: unknown) {
+      setIsStarting(false);
       setIsRecording(false);
+      const msg = err instanceof Error ? err.message : "Could not access microphone.";
+      console.error("Microphone startup failed:", err);
+      dispatch({
+        type: "request_failed",
+        requestId: ++requestSeqRef.current,
+        message: `Microphone permission denied or unavailable: ${msg}`,
+      });
     }
   };
 
   // Stop Live Detection
   const handleStopDetection = () => {
+    startAttemptRef.current += 1;
     if (recorderRef.current) {
       recorderRef.current.stop();
       recorderRef.current = null;
@@ -226,98 +172,89 @@ export default function Home() {
       timerRef.current = null;
     }
     setIsRecording(false);
-    setIsAnalyzing(false);
-    activeRequestsRef.current = 0;
+    setIsStarting(false);
+    dispatch({ type: "request_invalidated", requestId: ++requestSeqRef.current });
     setAudioLevel(0);
     setWaveformData(null);
-    recentScoresRef.current = [];
   };
 
   // File Upload Ingestion
   const handleFileSelected = async (file: File) => {
-    if (isRecording) handleStopDetection();
-    setIsDemoSimulated(false);
-    activeRequestsRef.current += 1;
-    setIsAnalyzing(true);
-    setErrorMessage(null);
+    if (isRecording || isStarting) handleStopDetection();
+    const requestId = ++requestSeqRef.current;
+    dispatch({ type: "request_started", requestId, clearResult: true });
 
     try {
       const formData = new FormData();
       formData.append("file", file, file.name);
-
       const resp = await fetch(`${API_URL}/detect`, { method: "POST", body: formData });
       if (!resp.ok) {
         const errorBody = await resp.json().catch(() => null);
-        const detail = errorBody?.detail || `Upload processing failed (HTTP ${resp.status})`;
+        const detail = errorBody?.error?.message || errorBody?.detail || `Upload processing failed (HTTP ${resp.status})`;
         throw new Error(detail);
       }
 
-      const data: DetectionResponse = await resp.json();
-      handleDetectionData(data, ++latestSeqRef.current, false);
-    } catch (err: any) {
+      const data: DetectionResponse = { ...(await resp.json()), mode: "real" };
+      handleDetectionData(data, requestId, false);
+    } catch (err: unknown) {
+      const error = err instanceof Error ? err : new Error(String(err));
       console.error("Upload failed:", err);
-      setErrorMessage(err.message || "Upload processing failed.");
-    } finally {
-      activeRequestsRef.current = Math.max(0, activeRequestsRef.current - 1);
-      if (activeRequestsRef.current === 0) {
-        setIsAnalyzing(false);
-      }
+      dispatch({ type: "request_failed", requestId, clearResult: true, message: error.message || "Upload processing failed." });
     }
   };
 
   // Demo Simulation: Authentic Voice
   const handleSimulateGenuine = () => {
-    setIsDemoSimulated(true);
-    setIsAnalyzing(true);
-    setErrorMessage(null);
+    const requestId = ++requestSeqRef.current;
+    dispatch({ type: "request_started", requestId, clearResult: true });
 
     setTimeout(() => {
-      const mock: DetectionResponse = {
-        prediction: "authentic",
-        confidence: 0.93,
-        model_spoof_score: 0.07,
-        risk_score: 7,
-        risk_level: "Low",
-        processing_time_ms: 18.2,
-        model_source: "demo_simulation",
-      };
-      handleDetectionData(mock, ++latestSeqRef.current, false);
-      setIsBlocked(false);
-      setIsVerified(false);
-      setIsAnalyzing(false);
+      const mock = createDemoResult(false);
+      handleDetectionData(mock, requestId, false);
     }, 600);
   };
 
   // Demo Simulation: Cloned Voice
   const handleSimulateClone = () => {
-    setIsDemoSimulated(true);
-    setIsAnalyzing(true);
-    setErrorMessage(null);
+    const requestId = ++requestSeqRef.current;
+    dispatch({ type: "request_started", requestId, clearResult: true });
 
     setTimeout(() => {
-      const mock: DetectionResponse = {
-        prediction: "AI-generated",
-        confidence: 0.88,
-        model_spoof_score: 0.88,
-        risk_score: 88,
-        risk_level: "Critical",
-        processing_time_ms: 22.4,
-        model_source: "demo_simulation",
-      };
-      handleDetectionData(mock, ++latestSeqRef.current, false);
-      setIsAnalyzing(false);
+      const mock = createDemoResult(true);
+      handleDetectionData(mock, requestId, false);
     }, 700);
+  };
+
+  const handleTestSample = async (samplePath: string, sampleName: string) => {
+    if (isRecording || isStarting) handleStopDetection();
+    const requestId = ++requestSeqRef.current;
+    dispatch({ type: "request_started", requestId, clearResult: true });
+
+    try {
+      const resp = await fetch(samplePath);
+      if (!resp.ok) throw new Error(`Could not load audio sample ${sampleName}`);
+      const blob = await resp.blob();
+      const file = new File([blob], sampleName, { type: blob.type || "audio/wav" });
+      
+      const formData = new FormData();
+      formData.append("file", file, file.name);
+      const apiResp = await fetch(`${API_URL}/detect`, { method: "POST", body: formData });
+      if (!apiResp.ok) {
+        const errorBody = await apiResp.json().catch(() => null);
+        throw new Error(errorBody?.error?.message || errorBody?.detail || `HTTP ${apiResp.status}`);
+      }
+      const data: DetectionResponse = { ...(await apiResp.json()), mode: "real" };
+      handleDetectionData(data, requestId, false);
+    } catch (err: unknown) {
+      const error = err instanceof Error ? err : new Error(String(err));
+      console.error("Test sample failed:", err);
+      dispatch({ type: "request_failed", requestId, clearResult: true, message: error.message || "Failed to analyze sample." });
+    }
   };
 
   const handleReset = () => {
     handleStopDetection();
-    setResult(null);
-    setIsBlocked(false);
-    setIsVerified(false);
-    setIsVerificationOpen(false);
-    setIsDemoSimulated(false);
-    setErrorMessage(null);
-    recentScoresRef.current = [];
+    dispatch({ type: "reset", requestId: ++requestSeqRef.current });
   };
 
   const formatTimer = (secs: number) => {
@@ -326,24 +263,14 @@ export default function Home() {
     return `${m}:${s}`;
   };
 
-  const isThreatActive = result ? result.risk_level === "High" || result.risk_level === "Critical" : false;
+  const isThreatActive = result?.prediction.label === "likely_ai_generated";
 
   return (
     <>
       {/* 1. Fullscreen Boot Preloader */}
       {showPreloader && <Preloader onComplete={() => setShowPreloader(false)} />}
 
-      {/* 2. Fullscreen Sound Gate Entrance */}
-      {!showPreloader && showSoundGate && (
-        <SoundGate
-          onEnter={(sound) => {
-            setSoundEnabled(sound);
-            setShowSoundGate(false);
-          }}
-        />
-      )}
-
-      {/* 3. Main Cinematic Command Center */}
+      {/* Main Cinematic Command Center */}
       <PageTransition>
         <div className="max-w-7xl mx-auto px-5 sm:px-8 py-6 space-y-16">
           {/* Hero Section */}
@@ -378,35 +305,64 @@ export default function Home() {
                 transition={{ delay: 0.35, duration: 0.6 }}
                 className="flex flex-wrap items-center gap-4 mt-8"
               >
-                {!isRecording ? (
+                {!isRecording && !isStarting ? (
                   <button
                     type="button"
                     onClick={handleStartDetection}
-                    className="px-8 py-3.5 rounded-full bg-[#66b7ff] hover:bg-[#8ddcff] text-[#090b11] font-mono text-xs tracking-wider font-semibold transition-all shadow-lg flex items-center gap-2.5"
+                    className="px-8 py-3.5 rounded-full bg-[#66b7ff] hover:bg-[#8ddcff] text-[#090b11] font-mono text-sm tracking-wider font-semibold transition-all shadow-lg flex items-center gap-2.5 group"
                   >
                     <Mic size={15} />
-                    <span>START DETECTION</span>
+                    <span>START LIVE DETECTION</span>
+                    <span className="px-2 py-0.5 rounded text-[11px] font-mono bg-[#090b11]/25 text-[#090b11] font-bold">
+                      UPCOMING ❤️
+                    </span>
                   </button>
                 ) : (
                   <button
                     type="button"
                     onClick={handleStopDetection}
-                    className="px-8 py-3.5 rounded-full bg-[#e66d76] hover:bg-[#e66d76]/90 text-white font-mono text-xs tracking-wider font-semibold transition-all shadow-lg flex items-center gap-2.5 animate-pulse"
+                    className="px-8 py-3.5 rounded-full bg-[#e66d76] hover:bg-[#e66d76]/90 text-white font-mono text-sm tracking-wider font-semibold transition-all shadow-lg flex items-center gap-2.5 animate-pulse"
                   >
                     <MicOff size={15} />
-                    <span>STOP DETECTION</span>
+                    <span>{isStarting ? "CANCEL START" : "STOP DETECTION"}</span>
                   </button>
                 )}
 
-                <UploadAudio onFileSelected={handleFileSelected} disabled={isRecording} />
+                <UploadAudio onFileSelected={handleFileSelected} disabled={isRecording || isStarting} />
 
                 {/* State Tag */}
                 {isRecording && (
-                  <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-[#111520] border border-[rgba(255,255,255,0.12)] text-xs font-mono text-[#70d6a0]">
+                  <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-[#111520] border border-[rgba(255,255,255,0.12)] text-sm font-mono text-[#70d6a0]">
                     <span className="w-2 h-2 rounded-full bg-[#70d6a0] animate-ping" />
                     <span>LIVE AUDIO {formatTimer(recordingSeconds)}</span>
                   </div>
                 )}
+
+                {/* Instant Sample Test Buttons */}
+                <div className="w-full pt-3 flex flex-wrap items-center gap-2 sm:gap-3">
+                  <span className="text-xs font-mono uppercase tracking-wider text-[#9ba2b1]">
+                    Test Datasets:
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => handleTestSample("/samples/ai_voice_sample_1.wav", "ai_voice_sample_1.wav")}
+                    disabled={isRecording || isStarting || isAnalyzing}
+                    className="px-3 py-1.5 rounded-full border border-[#ef4444]/60 bg-[#ef4444]/15 hover:bg-[#ef4444]/30 text-[#fca5a5] hover:text-white font-mono text-xs tracking-wider transition-all flex items-center gap-1.5 shadow-sm disabled:opacity-50"
+                  >
+                    <Flame size={13} className="text-[#ef4444]" />
+                    <span>TEST AI VOICE (DEEPFAKE)</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleTestSample("/samples/human_voice_sample_1.mp3", "human_voice_sample_1.mp3")}
+                    disabled={isRecording || isStarting || isAnalyzing}
+                    className="px-3 py-1.5 rounded-full border border-[#10b981]/60 bg-[#10b981]/15 hover:bg-[#10b981]/30 text-[#a7f3d0] hover:text-white font-mono text-xs tracking-wider transition-all flex items-center gap-1.5 shadow-sm disabled:opacity-50"
+                  >
+                    <Sparkles size={13} className="text-[#10b981]" />
+                    <span>TEST HUMAN VOICE (REAL)</span>
+                  </button>
+                </div>
               </motion.div>
             </div>
 
@@ -415,21 +371,21 @@ export default function Home() {
               <AudioLandscape
                 isRecording={isRecording}
                 audioLevel={audioLevel}
-                riskLevel={result ? result.risk_level : "Low"}
+                riskLevel={riskOf(result)}
               />
             </div>
           </section>
 
           {/* User Error Banner */}
           {errorMessage && (
-            <div className="p-4 rounded-xl bg-[#e66d76]/10 border border-[#e66d76]/40 text-[#e66d76] flex items-center justify-between text-xs font-mono">
+            <div className="p-4 rounded-xl bg-[#e66d76]/10 border border-[#e66d76]/40 text-[#e66d76] flex items-center justify-between text-sm font-mono">
               <div className="flex items-center gap-2">
                 <span className="font-bold">NOTICE:</span>
                 <span>{errorMessage}</span>
               </div>
               <button
                 type="button"
-                onClick={() => setErrorMessage(null)}
+                onClick={() => dispatch({ type: "clear_error" })}
                 className="text-[#e66d76] hover:text-white px-2 py-0.5 rounded text-sm transition-colors"
               >
                 ✕
@@ -440,9 +396,8 @@ export default function Home() {
           {/* High / Critical Threat Warning Layer */}
           {isThreatActive && result && (
             <WarningPanel
-              riskScore={result.risk_score}
-              riskLevel={result.risk_level === "Critical" ? "Critical" : "High"}
-              onOpenVerification={() => setIsVerificationOpen(true)}
+              aiProbability={result.prediction.ai_probability ?? 0}
+              humanProbability={result.prediction.human_probability ?? 0}
             />
           )}
 
@@ -454,7 +409,7 @@ export default function Home() {
               waveformData={waveformData}
               chunkNumber={chunkCounter}
               isAnalyzing={isAnalyzing}
-              riskLevel={result ? result.risk_level : "Low"}
+              riskLevel={riskOf(result)}
             />
 
             {/* Sequential Neural Analysis Nodes */}
@@ -464,29 +419,22 @@ export default function Home() {
             />
 
             {/* Primary Result Headline */}
-            <DetectionResult
-              prediction={result?.prediction}
-              rawModelPrediction={result?.raw_model_prediction}
-              confidence={result?.confidence}
-              modelSpoofScore={result?.model_spoof_score}
-              riskScore={result?.risk_score}
-              riskLevel={result?.risk_level}
-              audioQualityScore={result?.audio_quality_score}
-              audioQualityRating={result?.audio_quality_rating}
-              detectionReliability={result?.detection_reliability}
-              qualityWarning={result?.quality_warning}
-              qualityFlags={result?.quality_flags}
-              isDemoSimulated={isDemoSimulated}
-            />
+            <DetectionResult result={result} isAnalyzing={isAnalyzing} />
 
-            {/* Twin Threat Gauge & Demo Controls */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <RiskIndicator
-                score={result?.risk_score ?? null}
-                level={result?.risk_level ?? null}
-                confidence={result?.confidence ?? null}
+            {/* Comprehensive Threat Risk Meter */}
+            {result && (
+              <RiskMeter
+                score={result.prediction.fake_score ?? (result.prediction.ai_probability ? Math.round(result.prediction.ai_probability * 100) : 0)}
+                level={riskOf(result)}
+                prediction={result.prediction.label === "likely_ai_generated" ? "AI-generated" : "authentic"}
               />
+            )}
 
+            {/* Context-Aware Scam Intent Analysis (Speech-to-Text & Social Engineering Defense) */}
+            <ScamIntentAnalysis result={result} isAnalyzing={isAnalyzing} />
+
+          {/* Demo controls remain separate from uploaded audio inference. */}
+          <div className="grid grid-cols-1 gap-6">
               <DemoMode
                 isDemoMode={isDemoMode}
                 onToggleDemoMode={setIsDemoMode}
@@ -501,16 +449,16 @@ export default function Home() {
           {/* Section: Overview / How It Works */}
           <section className="pt-10 border-t border-[rgba(255,255,255,0.08)] space-y-10">
             <div className="max-w-2xl">
-              <span className="text-[10px] font-mono tracking-widest text-[#66b7ff] uppercase block mb-2">
+              <span className="text-[12px] font-mono tracking-widest text-[#66b7ff] uppercase block mb-2">
                 DEFENSE ARCHITECTURE
               </span>
               <h2 className="font-serif-cinematic text-3xl sm:text-4xl text-[#f4f5f7]">
                 Voice can be copied. <br />
-                Trust shouldn't be.
+                Trust shouldn&apos;t be.
               </h2>
-              <p className="mt-3 text-xs sm:text-sm text-[#9ba2b1] leading-relaxed">
-                EchoSentinel analyzes acoustic micro-signatures associated with AI speech synthesis
-                and introduces an active identity challenge before sensitive continuation is unlocked.
+              <p className="mt-3 text-sm sm:text-sm text-[#9ba2b1] leading-relaxed">
+                EchoSentinel analyzes audio for patterns associated with synthetic speech and presents
+                model scores, signal measurements, and the limits of each result.
               </p>
             </div>
 
@@ -521,13 +469,13 @@ export default function Home() {
                   key={step.step}
                   className="p-5 rounded-xl bg-[#111520] border border-[rgba(255,255,255,0.08)] space-y-3"
                 >
-                  <span className="text-xs font-mono text-[#66b7ff] font-semibold block">
+                  <span className="text-sm font-mono text-[#66b7ff] font-semibold block">
                     {step.step}
                   </span>
                   <h3 className="text-sm font-mono tracking-wider font-bold text-[#f4f5f7] uppercase">
                     {step.title}
                   </h3>
-                  <p className="text-xs text-[#9ba2b1] leading-relaxed">
+                  <p className="text-sm text-[#9ba2b1] leading-relaxed">
                     {step.description}
                   </p>
                 </div>
@@ -539,33 +487,33 @@ export default function Home() {
           <section className="p-6 sm:p-8 rounded-2xl bg-[#111520] border border-[rgba(255,255,255,0.12)] space-y-6">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <div>
-                <span className="text-[10px] font-mono tracking-widest text-[#9ba2b1] uppercase block">
+                <span className="text-[12px] font-mono tracking-widest text-[#9ba2b1] uppercase block">
                   TECHNICAL PIPELINE
                 </span>
                 <h3 className="font-serif-cinematic text-2xl text-[#f4f5f7] mt-0.5">
                   Under the Surface
                 </h3>
               </div>
-              <span className="text-[11px] font-mono text-[#70d6a0] px-3 py-1 rounded-full bg-[#70d6a0]/10 border border-[#70d6a0]/30 self-start sm:self-auto">
+              <span className="text-[13px] font-mono text-[#70d6a0] px-3 py-1 rounded-full bg-[#70d6a0]/10 border border-[#70d6a0]/30 self-start sm:self-auto">
                 PyTorch Wav2Vec2 Sequence Classification
               </span>
             </div>
 
-            <p className="text-xs sm:text-sm text-[#9ba2b1] leading-relaxed max-w-3xl">
+            <p className="text-sm sm:text-sm text-[#9ba2b1] leading-relaxed max-w-3xl">
               Incoming 16 kHz audio chunks pass through our feature extraction pipeline and sequence
               classification layers. The model evaluates bonafide vs. spoof probabilities across
-              temporal acoustic frames, outputting calibrated threat scores to the client in real time.
+              temporal acoustic frames, outputting uncalibrated class scores to the client in real time.
             </p>
 
-            <div className="p-4 rounded-xl bg-[#090b11] border border-[rgba(255,255,255,0.08)] flex items-center justify-between text-xs font-mono text-[#9ba2b1] overflow-x-auto">
+            <div className="p-4 rounded-xl bg-[#090b11] border border-[rgba(255,255,255,0.08)] flex items-center justify-between text-sm font-mono text-[#9ba2b1] overflow-x-auto">
               <span>AUDIO INGEST</span>
-              <span className="text-[#626978]">→</span>
+              <span className="text-[#8b93a3]">→</span>
               <span>16 KHZ RESAMPLING</span>
-              <span className="text-[#626978]">→</span>
+              <span className="text-[#8b93a3]">→</span>
               <span>WAV2VEC2 TRANSFORMER</span>
-              <span className="text-[#626978]">→</span>
+              <span className="text-[#8b93a3]">→</span>
               <span>RISK ENGINE (0-100)</span>
-              <span className="text-[#626978]">→</span>
+              <span className="text-[#8b93a3]">→</span>
               <span>IDENTITY GATE</span>
             </div>
           </section>
@@ -573,7 +521,7 @@ export default function Home() {
           {/* Section: Limitations & Honesty */}
           <section className="space-y-6">
             <div className="max-w-xl">
-              <span className="text-[10px] font-mono tracking-widest text-[#e8c86b] uppercase block mb-1.5">
+              <span className="text-[12px] font-mono tracking-widest text-[#e8c86b] uppercase block mb-1.5">
                 HONEST GUARANTEES
               </span>
               <h3 className="font-serif-cinematic text-2xl text-[#f4f5f7]">
@@ -587,44 +535,29 @@ export default function Home() {
                   key={idx}
                   className="p-5 rounded-xl bg-[#111520] border border-[rgba(255,255,255,0.08)] space-y-2"
                 >
-                  <h4 className="text-xs font-mono font-semibold text-[#f4f5f7]">
-                    "{item.title}"
+                  <h4 className="text-sm font-mono font-semibold text-[#f4f5f7]">
+                    &quot;{item.title}&quot;
                   </h4>
-                  <p className="text-xs text-[#9ba2b1] leading-relaxed">
+                  <p className="text-sm text-[#9ba2b1] leading-relaxed">
                     {item.detail}
                   </p>
                 </div>
               ))}
             </div>
 
-            <div className="p-4 rounded-xl bg-[#090b11] border border-[rgba(255,255,255,0.08)] text-xs text-[#9ba2b1] text-center italic">
+            <div className="p-4 rounded-xl bg-[#090b11] border border-[rgba(255,255,255,0.08)] text-sm text-[#9ba2b1] text-center italic">
               Detection is one layer of defense. Acoustic verification informs judgment; it does not replace multi-factor institutional protocols.
             </div>
           </section>
 
           {/* Footer */}
-          <footer className="pt-8 border-t border-[rgba(255,255,255,0.08)] flex flex-col sm:flex-row items-center justify-between gap-4 text-xs font-mono text-[#626978]">
+          <footer className="pt-8 border-t border-[rgba(255,255,255,0.08)] flex flex-col sm:flex-row items-center justify-between gap-4 text-sm font-mono text-[#8b93a3]">
             <span>ECHOSENTINEL • VOICE SAFETY PROTOTYPE</span>
             <span>WAV2VEC2 + FASTAPI + NEXT.JS</span>
           </footer>
         </div>
       </PageTransition>
 
-      {/* Identity Verification Step-Up Modal */}
-      <IdentityVerification
-        isOpen={isVerificationOpen}
-        onPass={() => {
-          setIsVerificationOpen(false);
-          setIsBlocked(false);
-          setIsVerified(true);
-        }}
-        onFail={() => {
-          setIsVerificationOpen(false);
-          setIsBlocked(true);
-          setIsVerified(false);
-        }}
-        onClose={() => setIsVerificationOpen(false)}
-      />
     </>
   );
 }

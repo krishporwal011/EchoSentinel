@@ -2,6 +2,7 @@
 
 import React from "react";
 import { PlayCircle, UserCheck, Bot, RefreshCw } from "lucide-react";
+import { triggerUpcomingFeatureModal } from "./UpcomingFeatureModal";
 
 interface DemoControlsProps {
   isDemoMode: boolean;
@@ -29,13 +30,13 @@ export const DemoControls: React.FC<DemoControlsProps> = ({
           </div>
           <div>
             <h3 className="text-sm font-semibold text-slate-100">Scenario Demo Showcase</h3>
-            <p className="text-xs text-slate-400">Deterministic testing for evaluation & presentation</p>
+            <p className="text-sm text-slate-400">Deterministic testing for evaluation & presentation</p>
           </div>
         </div>
 
         {/* Demo Mode Toggle */}
         <div className="flex items-center gap-2.5 self-start sm:self-auto">
-          <span className="text-xs font-mono text-slate-400">
+          <span className="text-sm font-mono text-slate-400">
             {isDemoMode ? "Demo Mode" : "Live Pipeline"}
           </span>
           <button
@@ -59,18 +60,18 @@ export const DemoControls: React.FC<DemoControlsProps> = ({
       {isDemoMode ? (
         <div className="space-y-3 pt-1">
           {/* Clearly Labelled Simulation Banner */}
-          <div className="flex items-center justify-between bg-blue-950/40 border border-blue-800/60 px-3.5 py-2 rounded-lg text-xs text-blue-200">
+          <div className="flex items-center justify-between bg-blue-950/40 border border-blue-800/60 px-3.5 py-2 rounded-lg text-sm text-blue-200">
             <div className="flex items-center gap-2 font-mono">
               <span className="w-2 h-2 rounded-full bg-blue-400" />
               <strong>DEMO SIMULATION ACTIVE</strong>
             </div>
-            <span className="text-[11px] text-blue-300/80">
+            <span className="text-[13px] text-blue-300/80">
               Results are illustrative simulations
             </span>
           </div>
 
-          <p className="text-xs text-slate-400">
-            Select a calibrated scenario to test the detection-to-prevention workflow:
+          <p className="text-sm text-slate-400">
+            Select an illustrative scenario to preview the detection-to-prevention workflow:
           </p>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
@@ -86,11 +87,11 @@ export const DemoControls: React.FC<DemoControlsProps> = ({
                   <UserCheck size={16} />
                 </div>
                 <div>
-                  <div className="text-xs font-semibold text-slate-200 group-hover:text-white">
+                  <div className="text-sm font-semibold text-slate-200 group-hover:text-white">
                     1. Genuine Voice Sample
                   </div>
-                  <div className="text-[11px] text-emerald-400 font-mono">
-                    Likely Authentic • 93% • Low
+                  <div className="text-[13px] text-emerald-400 font-mono">
+                    Likely Authentic • 87% • Low
                   </div>
                 </div>
               </div>
@@ -109,10 +110,10 @@ export const DemoControls: React.FC<DemoControlsProps> = ({
                   <Bot size={16} />
                 </div>
                 <div>
-                  <div className="text-xs font-semibold text-slate-200 group-hover:text-white">
+                  <div className="text-sm font-semibold text-slate-200 group-hover:text-white">
                     2. AI Cloned Voice Sample
                   </div>
-                  <div className="text-[11px] text-red-400 font-mono">
+                  <div className="text-[13px] text-red-400 font-mono">
                     Possible Voice Clone • 88% • Critical
                   </div>
                 </div>
@@ -125,7 +126,7 @@ export const DemoControls: React.FC<DemoControlsProps> = ({
             <button
               type="button"
               onClick={onReset}
-              className="text-xs text-slate-400 hover:text-slate-200 flex items-center gap-1.5 px-2.5 py-1.5 rounded-md hover:bg-slate-800 transition-colors"
+              className="text-sm text-slate-400 hover:text-slate-200 flex items-center gap-1.5 px-2.5 py-1.5 rounded-md hover:bg-slate-800 transition-colors"
             >
               <RefreshCw size={12} />
               <span>Reset State</span>
@@ -133,14 +134,26 @@ export const DemoControls: React.FC<DemoControlsProps> = ({
           </div>
         </div>
       ) : (
-        <div className="text-xs text-slate-400 bg-slate-950 rounded-lg p-3 border border-slate-800 flex items-center justify-between">
+        <div className="text-sm text-slate-400 bg-slate-950 rounded-lg p-3 border border-slate-800 flex items-center justify-between">
           <span>
-            Connected to <strong>Real Wav2Vec2 Inference Pipeline</strong>. Click "Start Detection" to process live audio chunks.
+            Connected to <strong>Real Wav2Vec2 Inference Pipeline</strong>. Click{" "}
+            <button
+              type="button"
+              onClick={() => triggerUpcomingFeatureModal({
+                title: "It is an upcoming feature of EchoSentinel Team India ❤️",
+                message: "Live Detection & continuous microphone streaming is currently an upcoming feature being engineered by EchoSentinel Team India ❤️. You can test voice detection right now by uploading audio files or trying our instant sample datasets!",
+              })}
+              className="text-[#66b7ff] underline hover:text-[#8ddcff] font-semibold inline-flex items-center gap-1 cursor-pointer"
+            >
+              &quot;Start Live Detection&quot;
+              <span className="text-[10px] px-1 py-0.5 bg-[#66b7ff]/20 rounded text-[#8ddcff]">Upcoming ❤️</span>
+            </button>{" "}
+            to process live audio chunks.
           </span>
           <button
             type="button"
             onClick={() => onToggleDemoMode(true)}
-            className="text-xs font-medium text-blue-400 hover:text-blue-300 whitespace-nowrap ml-3"
+            className="text-sm font-medium text-blue-400 hover:text-blue-300 whitespace-nowrap ml-3"
           >
             Switch to Demo Mode →
           </button>

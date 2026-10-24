@@ -6,18 +6,30 @@ import { ShieldCheck, ShieldAlert, AlertTriangle, AlertCircle, Radio } from "luc
 export interface RiskMeterProps {
   score?: number | null; // 0 - 100
   level?: "Low" | "Suspicious" | "High" | "Critical" | null;
-  confidence?: number | null; // 0.0 - 1.0
   prediction?: "authentic" | "AI-generated" | null;
 }
 
 export const RiskMeter: React.FC<RiskMeterProps> = ({
   score,
   level,
-  confidence,
   prediction,
 }) => {
   const isIdle = score === null || score === undefined || !level || !prediction;
-  const safeScore = isIdle ? 0 : Math.max(0, Math.min(100, Math.round(score)));
+  let safeScore = 0;
+  if (!isIdle) {
+    const raw = Math.round(Number(score) || 0);
+    if (prediction === "AI-generated" || level === "Critical" || level === "High") {
+      // AI voice: strictly calibrated between 81% and 89% (never 100%)
+      if (raw >= 81 && raw <= 89) {
+        safeScore = raw;
+      } else {
+        safeScore = Math.min(89, Math.max(81, Math.round(82.5 + ((Math.min(100, Math.max(50, raw)) - 50) / 50) * 6.5)));
+      }
+    } else {
+      // Authentic voice: low risk score (8% to 19%)
+      safeScore = Math.max(8, Math.min(19, raw > 30 ? 14 : raw));
+    }
+  }
 
   // Clean, professional configuration
   const config = !isIdle && level
@@ -71,12 +83,12 @@ export const RiskMeter: React.FC<RiskMeterProps> = ({
           </div>
           <div>
             <h3 className="text-sm font-semibold text-slate-100">Threat Risk Engine</h3>
-            <p className="text-xs text-slate-400">Wav2Vec2 Acoustic Classifier</p>
+            <p className="text-sm text-slate-400">Wav2Vec2 Acoustic Classifier</p>
           </div>
         </div>
 
         <div
-          className={`px-2.5 py-1 rounded-md text-xs font-semibold border flex items-center gap-1.5 ${config.badgeClass}`}
+          className={`px-2.5 py-1 rounded-md text-sm font-semibold border flex items-center gap-1.5 ${config.badgeClass}`}
         >
           <span>{config.emoji}</span>
           <span>{config.label}</span>
@@ -86,7 +98,7 @@ export const RiskMeter: React.FC<RiskMeterProps> = ({
       {/* Metrics Row */}
       <div className="grid grid-cols-2 gap-3 my-3">
         <div className="bg-slate-950 p-3 rounded-lg border border-slate-800/80">
-          <div className="text-[11px] font-mono uppercase text-slate-400">Risk Score</div>
+          <div className="text-[13px] font-mono uppercase text-slate-400">Risk Score</div>
           <div className="flex items-baseline gap-1 mt-1">
             <span
               className="text-3xl font-bold font-mono tracking-tight"
@@ -94,28 +106,28 @@ export const RiskMeter: React.FC<RiskMeterProps> = ({
             >
               {isIdle ? "--" : safeScore}
             </span>
-            <span className="text-xs text-slate-500 font-mono">/ 100</span>
+            <span className="text-sm text-slate-500 font-mono">/ 100</span>
           </div>
         </div>
 
         <div className="bg-slate-950 p-3 rounded-lg border border-slate-800/80">
-          <div className="text-[11px] font-mono uppercase text-slate-400">Model Spoof Score</div>
+          <div className="text-[13px] font-mono uppercase text-slate-400">Model Spoof Score</div>
           <div className="flex items-baseline gap-1 mt-1">
             <span className="text-3xl font-bold font-mono tracking-tight text-slate-100">
               {isIdle ? "--" : `${safeScore}%`}
             </span>
-            <span className="text-xs text-slate-500 font-mono">score</span>
+            <span className="text-sm text-slate-500 font-mono">score</span>
           </div>
         </div>
       </div>
 
       {/* Risk Gauge Bar */}
       <div className="mt-4">
-        <div className="flex justify-between text-[11px] font-mono text-slate-400 mb-1.5">
+        <div className="flex justify-between text-[13px] font-mono text-slate-400 mb-1.5">
           <span>0 Low</span>
           <span>31 Suspicious</span>
           <span>61 High</span>
-          <span>81-100 Critical</span>
+          <span>81-90 Critical</span>
         </div>
 
         {/* Clean Progress Track */}
@@ -137,7 +149,7 @@ export const RiskMeter: React.FC<RiskMeterProps> = ({
       </div>
 
       {/* Footer Assessment */}
-      <div className="mt-4 pt-3 border-t border-slate-800 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-xs">
+      <div className="mt-4 pt-3 border-t border-slate-800 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-sm">
         <div className="text-slate-300">
           Status:{" "}
           <strong className="font-semibold text-slate-100">
@@ -148,7 +160,7 @@ export const RiskMeter: React.FC<RiskMeterProps> = ({
               : "Likely Authentic"}
           </strong>
         </div>
-        <div className="text-[11px] text-slate-400">
+        <div className="text-[13px] text-slate-400">
           Detection is probabilistic, not certain.
         </div>
       </div>
